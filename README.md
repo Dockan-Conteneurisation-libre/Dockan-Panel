@@ -32,6 +32,7 @@ It can:
 - run `dockan compose up`, `down`, `redeploy`, and `health` for a chosen `dockan.yml`
 - manage Portainer-style stacks from the UI by saving `dockan.yml` files, then deploying, stopping, redeploying, and checking health
 - import required stack images from a local Dockan registry folder before deployment
+- inspect Dockan, PHP, and FrankenPHP versions, preview dependency installs, install host packages/runtimes, and run Dockan updates
 - open a container detail page with actions, inspect output, logs, a live PTY terminal, and a one-shot exec fallback
 - manage admin users with password login, optional authenticator-app 2FA, and passkeys
 - install in the browser as a local PWA, with the Dockan logo and standalone window mode
@@ -87,6 +88,12 @@ to the running local panel.
 
 After login, open `Security` to add other admins, change passwords, enable 2FA,
 or register passkeys. Passkeys require `localhost`, `127.0.0.1`, or HTTPS.
+
+Open `Packages` to check the current Dockan version, preview dependency
+profiles, install host dependencies, prepare runtimes such as FrankenPHP or
+Node, and run release updates. System package installs use non-interactive
+`sudo`; configure passwordless permission for Dockan/package installs, or use
+the `Show Command` button and run the command on the host.
 
 This compose file uses `isolation: none` because the panel is an admin UI: it
 must call the host `dockan` CLI and manage the host Dockan containers.
@@ -315,4 +322,3 @@ Passkeys are verified server-side with the browser challenge and signature. They
 are still browser-dependent: if your browser cannot expose the WebAuthn public
 key during registration, use password plus 2FA instead.
 # Dockan-Panel
-

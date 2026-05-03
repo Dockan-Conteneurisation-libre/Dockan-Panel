@@ -125,6 +125,7 @@ $content = match ($view) {
     'stacks' => stacks_content($dockan),
     'compose' => compose_content($dockan),
     'logs' => logs_content($dockan),
+    'packages' => packages_content($dockan),
     'security' => security_content(),
     default => dashboard_content($dockan),
 };
@@ -155,6 +156,17 @@ function handle_action(string $action, string $dockan): string
         'stack-redeploy' => stack_compose_action($dockan, 'redeploy'),
         'stack-health' => stack_compose_action($dockan, 'health'),
         'stack-import-required' => stack_import_required_images($dockan),
+        'deps-profile-dry-run' => deps_profile_dry_run($dockan),
+        'deps-profile-install' => deps_profile_install($dockan),
+        'deps-profile-command' => deps_profile_command($dockan),
+        'deps-custom-dry-run' => deps_custom_dry_run($dockan),
+        'deps-custom-install' => deps_custom_install($dockan),
+        'deps-custom-command' => deps_custom_command($dockan),
+        'runtime-dry-run' => runtime_dry_run($dockan),
+        'runtime-install' => runtime_install($dockan),
+        'runtime-command' => runtime_command($dockan),
+        'update-run' => update_run($dockan),
+        'update-command' => update_command($dockan),
         'add-user' => add_user_action(),
         'delete-user' => delete_user_action(),
         'set-password' => set_password_action(),
@@ -485,6 +497,175 @@ function stack_import_required_images(string $dockan): string
     }
     $_GET['stack'] = $name;
     return trim(implode("\n", $output));
+}
+
+function deps_profile_dry_run(string $dockan): string
+{
+    $profile = clean_deps_profile(required_post('profile'));
+    return command_text(run_dockan($dockan, ['deps', 'install', '--dry-run', $profile]));
+}
+
+function deps_profile_install(string $dockan): string
+{
+    $profile = clean_deps_profile(required_post('profile'));
+    return sudo_command_text(sudo_dockan_run($dockan, ['deps', 'install', $profile, '-y']));
+}
+
+function deps_profile_command(string $dockan): string
+{
+    $profile = clean_deps_profile(required_post('profile'));
+    return sudo_dockan_command($dockan, ['deps', 'install', $profile, '-y']);
+}
+
+function deps_custom_dry_run(string $dockan): string
+{
+    $packages = required_package_list();
+    return command_text(run_dockan($dockan, array_merge(['deps', 'install', '--dry-run'], $packages)));
+}
+
+function deps_custom_install(string $dockan): string
+{
+    $packages = required_package_list();
+    return sudo_command_text(sudo_dockan_run($dockan, array_merge(['deps', 'install', '-y'], $packages)));
+}
+
+function deps_custom_command(string $dockan): string
+{
+    $packages = required_package_list();
+    return sudo_dockan_command($dockan, array_merge(['deps', 'install', '-y'], $packages));
+}
+
+function runtime_dry_run(string $dockan): string
+{
+    $runtime = clean_runtime_ref(required_post('runtime'));
+    return command_text(run_dockan($dockan, ['deps', 'runtime', $runtime, '--dry-run']));
+}
+
+function runtime_install(string $dockan): string
+{
+    $runtime = clean_runtime_ref(required_post('runtime'));
+    return sudo_command_text(sudo_dockan_run($dockan, ['deps', 'runtime', $runtime, '-y']));
+}
+
+function runtime_command(string $dockan): string
+{
+    $runtime = clean_runtime_ref(required_post('runtime'));
+    return sudo_dockan_command($dockan, ['deps', 'runtime', $runtime, '-y']);
+}
+
+function update_run(string $dockan): string
+{
+    $args = update_args();
+    if (isset($_POST['system'])) {
+        return sudo_command_text(sudo_dockan_run($dockan, $args));
+    }
+    return command_text(run_dockan($dockan, $args)) ?: 'Dockan update completed.';
+}
+
+function update_command(string $dockan): string
+{
+    $args = update_args();
+    if (isset($_POST['system'])) {
+        return sudo_dockan_command($dockan, $args);
+    }
+    return shell_command(array_merge([$dockan], $args));
+}
+
+function update_args(): array
+{
+    $version = trim((string) ($_POST['version'] ?? ''));
+    if ($version !== '' && !preg_match('/^v?[0-9][A-Za-z0-9._-]{0,63}$/', $version)) {
+        throw new RuntimeException('Invalid release version.');
+    }
+    $args = ['update'];
+    if ($version !== '') {
+        $args[] = '--version';
+        $args[] = $version;
+    }
+    if (isset($_POST['system'])) {
+        $args[] = '--system';
+    }
+    return $args;
+}
+
+function clean_deps_profile(string $profile): string
+{
+    if (!array_key_exists($profile, deps_profiles())) {
+        throw new RuntimeException('Unknown dependency profile.');
+    }
+    return $profile;
+}
+
+function clean_runtime_ref(string $runtime): string
+{
+    if (!array_key_exists($runtime, runtime_refs())) {
+        throw new RuntimeException('Unknown runtime.');
+    }
+    return $runtime;
+}
+
+function required_package_list(): array
+{
+    $raw = preg_replace('/\s+/', ' ', trim((string) ($_POST['packages'] ?? ''))) ?? '';
+    $packages = parse_command_values($raw);
+    if (!$packages) {
+        throw new RuntimeException('Missing package list.');
+    }
+    return $packages;
+}
+
+function deps_profiles(): array
+{
+    return [
+        'core' => 'Core host tools',
+        'tools' => 'Common utilities',
+        'frontend' => 'Node/npm frontend apps',
+        'network' => 'Bridge, DNS, ping, sockets',
+        'database' => 'Database clients',
+        'web' => 'Nginx and Caddy',
+        'build' => 'Build toolchain',
+        'debug' => 'Diagnostics',
+        'isolation' => 'Rootless isolation helpers',
+        'full' => 'Recommended full host setup',
+    ];
+}
+
+function runtime_refs(): array
+{
+    return [
+        'frankenphp' => 'FrankenPHP',
+        'php:8.3' => 'PHP 8.3',
+        'node:20' => 'Node.js 20',
+        'python:3.12' => 'Python 3.12',
+        'golang:1.22' => 'Go 1.22',
+        'openjdk:21' => 'OpenJDK 21',
+    ];
+}
+
+function sudo_dockan_command(string $dockan, array $args): string
+{
+    return 'sudo env "PATH=$HOME/.local/bin:$PATH" ' . shell_command(array_merge([$dockan], $args));
+}
+
+function sudo_dockan_run(string $dockan, array $args): array
+{
+    return run_command(array_merge(['sudo', '-n', 'env', 'PATH=' . sudo_path_value(), $dockan], $args));
+}
+
+function sudo_path_value(): string
+{
+    $home = getenv('HOME') ?: '';
+    $path = getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin';
+    return ($home !== '' ? $home . '/.local/bin:' : '') . $path;
+}
+
+function sudo_command_text(array $result): string
+{
+    $text = trim((string) $result['stdout'] . "\n" . (string) $result['stderr']);
+    if ((int) $result['code'] !== 0 && stripos($text, 'sudo:') !== false && preg_match('/password|mot de passe|terminal/i', $text)) {
+        throw new RuntimeException('sudo cannot run from the panel without passwordless permission. Configure NOPASSWD for Dockan/package installs, or use Show Command and run it on the host.');
+    }
+    return command_text($result) ?: 'Command completed.';
 }
 
 function backup_volume(string $dockan, string $name): string
@@ -1424,6 +1605,68 @@ function networks_content(string $dockan): string
     return section('Networks', $body);
 }
 
+function packages_content(string $dockan): string
+{
+    $version = command_or_empty($dockan, ['version']) ?: 'Unavailable';
+    $doctor = command_or_empty($dockan, ['doctor']) ?: 'Unavailable';
+    $dockanPath = trim(command_output_or_empty(['sh', '-lc', 'command -v ' . escapeshellarg($dockan) . ' 2>/dev/null || printf %s ' . escapeshellarg($dockan)]));
+    $frankenphp = command_output_or_empty(['frankenphp', 'version']) ?: 'Unavailable';
+
+    $status = '<div class="table-wrap"><table><thead><tr><th>Item</th><th>Value</th></tr></thead><tbody>' .
+        '<tr><td>Dockan binary</td><td class="path">' . e($dockanPath !== '' ? $dockanPath : $dockan) . '</td></tr>' .
+        '<tr><td>Dockan version</td><td><pre>' . e($version) . '</pre></td></tr>' .
+        '<tr><td>PHP runtime</td><td>' . e(PHP_VERSION) . '</td></tr>' .
+        '<tr><td>FrankenPHP</td><td><pre>' . e($frankenphp) . '</pre></td></tr>' .
+        '</tbody></table></div>';
+
+    $profiles = options_html(deps_profiles(), 'full');
+    $profileForm = '<form method="post" class="package-form">' . csrf_field() .
+        '<label>Profile<select name="profile">' . $profiles . '</select></label>' .
+        '<div class="actions">' .
+        action_submit('deps-profile-dry-run', 'Preview') .
+        action_submit('deps-profile-install', 'Run Install') .
+        action_submit('deps-profile-command', 'Show Command') .
+        '</div></form>' .
+        '<p class="help">Preview runs <code>dockan deps install --dry-run</code>. Run Install executes it from the panel with non-interactive sudo.</p>';
+
+    $runtimes = options_html(runtime_refs(), 'frankenphp');
+    $runtimeForm = '<form method="post" class="package-form">' . csrf_field() .
+        '<label>Runtime<select name="runtime">' . $runtimes . '</select></label>' .
+        '<div class="actions">' .
+        action_submit('runtime-dry-run', 'Preview') .
+        action_submit('runtime-install', 'Run Install') .
+        action_submit('runtime-command', 'Show Command') .
+        '</div></form>' .
+        '<p class="help">Use this for language runtimes such as FrankenPHP, PHP, Node, Python, Go, or Java.</p>';
+
+    $customForm = '<form method="post" class="stack-form">' . csrf_field() .
+        '<label>Native packages<textarea name="packages" class="small-editor" spellcheck="false" placeholder="curl git nodejs-20.11.1">' . e((string) ($_POST['packages'] ?? '')) . '</textarea><span class="help">One shell-style list. Native version syntax is allowed, for example <code>nodejs-20.11.1</code> or <code>nodejs=20.*</code>.</span></label>' .
+        '<div class="actions">' .
+        action_submit('deps-custom-dry-run', 'Preview') .
+        action_submit('deps-custom-install', 'Run Install') .
+        action_submit('deps-custom-command', 'Show Command') .
+        '</div></form>';
+
+    $updateForm = '<form method="post" class="package-form">' . csrf_field() .
+        '<label>Release version<input name="version" placeholder="v0.1.3" value="' . e((string) ($_POST['version'] ?? '')) . '"><span class="help">Leave empty for the latest release.</span></label>' .
+        '<label class="check-row"><input type="checkbox" name="system" value="1"> System install</label>' .
+        '<div class="actions">' . action_submit('update-run', 'Run Update') . action_submit('update-command', 'Show Command') . '</div>' .
+        '</form>' .
+        '<pre>' . e(implode("\n", [
+            'dockan update',
+            'dockan update --version v0.1.3',
+            'sudo env "PATH=$HOME/.local/bin:$PATH" dockan update --system',
+            'curl -fsSL https://raw.githubusercontent.com/Dockan-Conteneurisation-libre/Dockan/main/scripts/install.sh | sh',
+        ])) . '</pre>';
+
+    return section('Versions', $status) .
+        section('Dependency Profiles', $profileForm) .
+        section('Runtime Install', $runtimeForm) .
+        section('Custom Packages', $customForm) .
+        section('Updates And Releases', $updateForm) .
+        section('Doctor', '<pre>' . e($doctor) . '</pre>');
+}
+
 function security_content(): string
 {
     $user = require_admin();
@@ -1578,6 +1821,15 @@ function command_or_empty(string $dockan, array $args): string
     }
 }
 
+function command_output_or_empty(array $cmd): string
+{
+    try {
+        return command_text(run_command($cmd));
+    } catch (Throwable) {
+        return '';
+    }
+}
+
 function parse_table(string $text): array
 {
     $lines = array_values(array_filter(array_map('rtrim', preg_split('/\R/', trim($text)) ?: [])));
@@ -1680,6 +1932,16 @@ function stats_grid(array $stats): string
     return $html . '</div>';
 }
 
+function options_html(array $options, string $selected): string
+{
+    $html = '';
+    foreach ($options as $value => $label) {
+        $isSelected = $value === $selected ? ' selected' : '';
+        $html .= '<option value="' . e((string) $value) . '"' . $isSelected . '>' . e((string) $label) . '</option>';
+    }
+    return $html;
+}
+
 function section(string $title, string $body): string
 {
     return '<section><h2>' . e($title) . '</h2>' . $body . '</section>';
@@ -1761,6 +2023,7 @@ function nav_html(): string
         'stacks' => 'Stacks',
         'compose' => 'Compose',
         'logs' => 'Logs',
+        'packages' => 'Packages',
         'security' => 'Security',
     ];
     $html = '<header><div class="topbar"><a class="brand" href="?view=dashboard"><img src="?asset=logo" alt=""><span>Dockan Panel</span></a><nav>';
@@ -2555,6 +2818,13 @@ th {
   align-items: end;
   margin-bottom: 16px;
 }
+.package-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 16px;
+}
 .run-form {
   display: grid;
   gap: 12px;
@@ -2687,7 +2957,7 @@ code {
   nav a { scroll-snap-align: start; }
   nav a { padding: 6px 7px; }
   header form button { padding: 0 9px; font-size: 0.82rem; }
-  .stats, .compose-form, .inline-form, .run-basic, .advanced-grid, .security-grid { grid-template-columns: 1fr; }
+  .stats, .compose-form, .inline-form, .package-form, .run-basic, .advanced-grid, .security-grid { grid-template-columns: 1fr; }
   .shell { width: min(100vw - 24px, 1120px); margin-top: 12px; }
   section { padding: 14px; }
   textarea { min-height: 220px; }
