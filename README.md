@@ -20,7 +20,33 @@ It can:
 
 ## Start
 
-Set a token first:
+### With Dockan
+
+The panel can run as a Dockan app:
+
+```bash
+cd /path/to/Dockan-Panel
+dockan compose up
+```
+
+Open:
+
+```text
+http://127.0.0.1:9090
+```
+
+Default token from `dockan.yml`:
+
+```text
+dockan
+```
+
+This compose file uses `isolation: none` because the panel is an admin UI: it
+must call the host `dockan` CLI and manage the host Dockan containers.
+
+### Direct PHP
+
+You can also run it directly with PHP. Set a token first:
 
 ```bash
 cd /path/to/Dockan-Panel
