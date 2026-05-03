@@ -1,0 +1,719 @@
+<?php
+declare(strict_types=1);
+
+session_start();
+
+const APP_NAME = 'Dockan Panel';
+const STORAGE_DIR = __DIR__ . '/storage';
+const BACKUP_DIR = STORAGE_DIR . '/backups';
+
+ensure_storage();
+
+$token = getenv('DOCKAN_UI_TOKEN') ?: '';
+$dockan = getenv('DOCKAN_BIN') ?: 'dockan';
+$flash = null;
+$error = null;
+$view = $_GET['view'] ?? 'dashboard';
+
+if (isset($_POST['logout'])) {
+    $_SESSION = [];
+    session_destroy();
+    header('Location: ' . self_url());
+    exit;
+}
+
+if ($token === '') {
+    render_page('Locked', locked_content(), false);
+    exit;
+}
+
+if (!is_logged_in()) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['token'] ?? '') !== '') {
+        if (hash_equals($token, (string) $_POST['token'])) {
+            $_SESSION['dockan_ui_auth'] = true;
+            $_SESSION['csrf'] = bin2hex(random_bytes(24));
+            header('Location: ' . self_url());
+            exit;
+        }
+        $error = 'Invalid token.';
+    }
+    render_page('Login', login_content($error), false);
+    exit;
+}
+
+if (empty($_SESSION['csrf'])) {
+    $_SESSION['csrf'] = bin2hex(random_bytes(24));
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    try {
+        verify_csrf();
+        $result = handle_action((string) $_POST['action'], $dockan);
+        $flash = $result === '' ? 'Done.' : $result;
+    } catch (Throwable $e) {
+        $error = $e->getMessage();
+    }
+}
+
+$content = match ($view) {
+    'containers' => containers_content($dockan),
+    'images' => images_content($dockan),
+    'volumes' => volumes_content($dockan),
+    'networks' => networks_content($dockan),
+    'compose' => compose_content($dockan),
+    'logs' => logs_content($dockan),
+    default => dashboard_content($dockan),
+};
+
+render_page(page_title($view), $content, true, $flash, $error);
+
+function handle_action(string $action, string $dockan): string
+{
+    return match ($action) {
+        'stop-container' => command_text(run_dockan($dockan, ['stop', required_post('name')])),
+        'remove-container' => command_text(run_dockan($dockan, ['rm', required_post('name')])),
+        'health-container' => command_text(run_dockan($dockan, ['health', required_post('name')])),
+        'remove-image' => command_text(run_dockan($dockan, ['rmi', required_post('tag')])),
+        'create-volume' => command_text(run_dockan($dockan, ['volume', 'create', required_post('name')])),
+        'remove-volume' => command_text(run_dockan($dockan, ['volume', 'rm', required_post('name')])),
+        'backup-volume' => backup_volume($dockan, required_post('name')),
+        'restore-volume' => restore_volume($dockan),
+        'run-image' => run_image($dockan),
+        'compose-up' => compose_action($dockan, 'up'),
+        'compose-down' => compose_action($dockan, 'down'),
+        'compose-redeploy' => compose_action($dockan, 'redeploy'),
+        'compose-health' => compose_action($dockan, 'health'),
+        default => throw new RuntimeException('Unknown action.'),
+    };
+}
+
+function run_image(string $dockan): string
+{
+    $name = required_post('name');
+    $image = required_post('image');
+    $ports = trim((string) ($_POST['ports'] ?? ''));
+    $args = ['run', '-d', '--name', $name];
+    if ($ports !== '') {
+        $args[] = '-p';
+        $args[] = $ports;
+    }
+    $args[] = $image;
+    return command_text(run_dockan($dockan, $args));
+}
+
+function compose_action(string $dockan, string $action): string
+{
+    $file = required_post('file');
+    if (!is_file($file)) {
+        throw new RuntimeException('dockan.yml not found.');
+    }
+    return command_text(run_dockan($dockan, ['compose', $action, '-f', $file]));
+}
+
+function backup_volume(string $dockan, string $name): string
+{
+    $safe = preg_replace('/[^A-Za-z0-9_.-]+/', '-', $name);
+    $file = BACKUP_DIR . '/' . $safe . '-' . date('Ymd-His') . '.tar.gz';
+    $out = run_dockan($dockan, ['volume', 'backup', $name, $file]);
+    return trim(command_text($out) . "\n" . 'Backup: ' . $file);
+}
+
+function restore_volume(string $dockan): string
+{
+    $target = required_post('target');
+    $backup = required_post('backup');
+    $realBackup = realpath($backup);
+    $realBackupDir = realpath(BACKUP_DIR);
+    if ($realBackup === false || $realBackupDir === false || !str_starts_with($realBackup, $realBackupDir . DIRECTORY_SEPARATOR)) {
+        throw new RuntimeException('Backup file is outside the Dockan UI backup directory.');
+    }
+    return command_text(run_dockan($dockan, ['volume', 'restore', $target, $realBackup]));
+}
+
+function required_post(string $key): string
+{
+    $value = trim((string) ($_POST[$key] ?? ''));
+    if ($value === '') {
+        throw new RuntimeException('Missing value: ' . $key);
+    }
+    return $value;
+}
+
+function run_dockan(string $dockan, array $args): array
+{
+    $cmd = array_merge([$dockan], $args);
+    return run_command($cmd);
+}
+
+function run_command(array $cmd): array
+{
+    $command = implode(' ', array_map('escapeshellarg', $cmd));
+    $home = getenv('HOME') ?: '';
+    $oldPath = getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin';
+    if ($home !== '') {
+        putenv('PATH=' . $home . '/.local/bin:' . $oldPath);
+    }
+    $spec = [
+        0 => ['pipe', 'r'],
+        1 => ['pipe', 'w'],
+        2 => ['pipe', 'w'],
+    ];
+    $process = proc_open($command, $spec, $pipes);
+    putenv('PATH=' . $oldPath);
+    if (!is_resource($process)) {
+        throw new RuntimeException('Unable to run command.');
+    }
+    fclose($pipes[0]);
+    $stdout = stream_get_contents($pipes[1]) ?: '';
+    $stderr = stream_get_contents($pipes[2]) ?: '';
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $code = proc_close($process);
+    return ['code' => $code, 'stdout' => $stdout, 'stderr' => $stderr, 'command' => $command];
+}
+
+function command_text(array $result): string
+{
+    $text = trim((string) $result['stdout'] . "\n" . (string) $result['stderr']);
+    if ((int) $result['code'] !== 0) {
+        throw new RuntimeException($text === '' ? 'Command failed.' : $text);
+    }
+    return $text;
+}
+
+function dashboard_content(string $dockan): string
+{
+    $containers = parse_table(command_or_empty($dockan, ['ps', '-a']));
+    $images = parse_table(command_or_empty($dockan, ['images']));
+    $volumes = parse_table(command_or_empty($dockan, ['volume', 'ls']));
+    $networks = parse_table(command_or_empty($dockan, ['network', 'ls']));
+    $doctor = command_or_empty($dockan, ['doctor']);
+    return section('Overview', stats_grid([
+        'Containers' => count($containers),
+        'Images' => count($images),
+        'Volumes' => count($volumes),
+        'Networks' => count($networks),
+    ])) .
+    section('Quick Run', run_form($images)) .
+    section('Doctor', '<pre>' . e($doctor) . '</pre>');
+}
+
+function containers_content(string $dockan): string
+{
+    $rows = parse_table(command_or_empty($dockan, ['ps', '-a']));
+    $body = '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Status</th><th>PID</th><th>Image</th><th>Ports</th><th>Actions</th></tr></thead><tbody>';
+    foreach ($rows as $row) {
+        $name = $row['NAME'] ?? '';
+        $status = strtolower($row['STATUS'] ?? '');
+        $body .= '<tr>';
+        $body .= '<td><a href="?view=logs&name=' . rawurlencode($name) . '">' . e($name) . '</a></td>';
+        $body .= '<td>' . status_badge($status) . '</td>';
+        $body .= '<td>' . e($row['PID'] ?? '') . '</td>';
+        $body .= '<td>' . e($row['IMAGE'] ?? '') . '</td>';
+        $body .= '<td>' . e($row['PORTS'] ?? '') . '</td>';
+        $body .= '<td class="actions">' .
+            post_button('health-container', ['name' => $name], 'Health') .
+            post_button('stop-container', ['name' => $name], 'Stop') .
+            post_button('remove-container', ['name' => $name], 'Remove', 'danger') .
+            '</td>';
+        $body .= '</tr>';
+    }
+    if (!$rows) {
+        $body .= '<tr><td colspan="6" class="muted">No containers.</td></tr>';
+    }
+    $body .= '</tbody></table></div>';
+    return section('Containers', $body) . section('Run Image', run_form(parse_table(command_or_empty($dockan, ['images']))));
+}
+
+function images_content(string $dockan): string
+{
+    $rows = parse_table(command_or_empty($dockan, ['images']));
+    $body = '<div class="table-wrap"><table><thead><tr><th>Tag</th><th>Name</th><th>Path</th><th>Actions</th></tr></thead><tbody>';
+    foreach ($rows as $row) {
+        $tag = $row['TAG'] ?? '';
+        $body .= '<tr><td>' . e($tag) . '</td><td>' . e($row['NAME'] ?? '') . '</td><td class="path">' . e($row['PATH'] ?? '') . '</td><td class="actions">' .
+            post_button('remove-image', ['tag' => $tag], 'Remove', 'danger') .
+            '</td></tr>';
+    }
+    if (!$rows) {
+        $body .= '<tr><td colspan="4" class="muted">No images.</td></tr>';
+    }
+    $body .= '</tbody></table></div>';
+    return section('Images', $body);
+}
+
+function volumes_content(string $dockan): string
+{
+    $rows = parse_table(command_or_empty($dockan, ['volume', 'ls']));
+    $body = '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Path</th><th>Actions</th></tr></thead><tbody>';
+    foreach ($rows as $row) {
+        $name = $row['NAME'] ?? '';
+        $body .= '<tr><td>' . e($name) . '</td><td class="path">' . e($row['PATH'] ?? '') . '</td><td class="actions">' .
+            post_button('backup-volume', ['name' => $name], 'Backup') .
+            post_button('remove-volume', ['name' => $name], 'Remove', 'danger') .
+            '</td></tr>';
+    }
+    if (!$rows) {
+        $body .= '<tr><td colspan="3" class="muted">No volumes.</td></tr>';
+    }
+    $body .= '</tbody></table></div>';
+    $form = '<form method="post" class="inline-form">' . csrf_field() . '<input type="hidden" name="action" value="create-volume"><input name="name" placeholder="volume-name" required><button>Create Volume</button></form>';
+    $backups = backups_list();
+    return section('Volumes', $form . $body) . section('Backups', restore_form() . $backups);
+}
+
+function networks_content(string $dockan): string
+{
+    $rows = parse_table(command_or_empty($dockan, ['network', 'ls']));
+    $body = '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Driver</th><th>Subnet</th><th>Bridge</th></tr></thead><tbody>';
+    foreach ($rows as $row) {
+        $body .= '<tr><td>' . e($row['NAME'] ?? '') . '</td><td>' . e($row['DRIVER'] ?? '') . '</td><td>' . e($row['SUBNET'] ?? '') . '</td><td>' . e($row['BRIDGE'] ?? '') . '</td></tr>';
+    }
+    if (!$rows) {
+        $body .= '<tr><td colspan="4" class="muted">No networks.</td></tr>';
+    }
+    $body .= '</tbody></table></div>';
+    return section('Networks', $body);
+}
+
+function compose_content(string $dockan): string
+{
+    $default = getcwd() . '/dockan.yml';
+    $file = e((string) ($_POST['file'] ?? $_GET['file'] ?? $default));
+    $body = '<form method="post" class="compose-form">' . csrf_field() .
+        '<label>dockan.yml path<input name="file" value="' . $file . '" required></label>' .
+        '<div class="actions">' .
+        action_submit('compose-up', 'Up') .
+        action_submit('compose-down', 'Down') .
+        action_submit('compose-redeploy', 'Redeploy') .
+        action_submit('compose-health', 'Health') .
+        '</div></form>';
+    return section('Compose', $body);
+}
+
+function logs_content(string $dockan): string
+{
+    $name = trim((string) ($_GET['name'] ?? $_POST['name'] ?? ''));
+    $logs = '';
+    if ($name !== '') {
+        $result = run_dockan($dockan, ['logs', $name]);
+        $logs = trim((string) $result['stdout'] . "\n" . (string) $result['stderr']);
+    }
+    $form = '<form method="get" class="inline-form"><input type="hidden" name="view" value="logs"><input name="name" placeholder="container-name" value="' . e($name) . '" required><button>Show Logs</button></form>';
+    return section('Logs', $form . '<pre>' . e($logs) . '</pre>');
+}
+
+function command_or_empty(string $dockan, array $args): string
+{
+    try {
+        return command_text(run_dockan($dockan, $args));
+    } catch (Throwable) {
+        return '';
+    }
+}
+
+function parse_table(string $text): array
+{
+    $lines = array_values(array_filter(array_map('rtrim', preg_split('/\R/', trim($text)) ?: [])));
+    if (count($lines) < 2) {
+        return [];
+    }
+    $headers = preg_split('/\s{2,}/', trim($lines[0])) ?: [];
+    $rows = [];
+    for ($i = 1; $i < count($lines); $i++) {
+        $parts = preg_split('/\s{2,}/', trim($lines[$i]), count($headers)) ?: [];
+        if (count($parts) === 1 && $parts[0] === '') {
+            continue;
+        }
+        $row = [];
+        foreach ($headers as $index => $header) {
+            $row[$header] = $parts[$index] ?? '';
+        }
+        $rows[] = $row;
+    }
+    return $rows;
+}
+
+function run_form(array $images): string
+{
+    $options = '';
+    foreach ($images as $image) {
+        $tag = $image['TAG'] ?? '';
+        if ($tag !== '') {
+            $options .= '<option value="' . e($tag) . '">' . e($tag) . '</option>';
+        }
+    }
+    if ($options === '') {
+        $options = '<option value="">No local image</option>';
+    }
+    return '<form method="post" class="run-form">' . csrf_field() .
+        '<input type="hidden" name="action" value="run-image">' .
+        '<label>Name<input name="name" placeholder="myapp" required></label>' .
+        '<label>Image<select name="image" required>' . $options . '</select></label>' .
+        '<label>Port mapping<input name="ports" placeholder="8080:8080"></label>' .
+        '<button>Run</button>' .
+        '</form>';
+}
+
+function backups_list(): string
+{
+    $files = glob(BACKUP_DIR . '/*.tar.gz') ?: [];
+    rsort($files);
+    if (!$files) {
+        return '<p class="muted">No backups.</p>';
+    }
+    $html = '<div class="table-wrap"><table><thead><tr><th>File</th><th>Size</th><th>Created</th></tr></thead><tbody>';
+    foreach ($files as $file) {
+        $html .= '<tr><td class="path">' . e($file) . '</td><td>' . e(human_bytes((int) filesize($file))) . '</td><td>' . e(date('Y-m-d H:i:s', (int) filemtime($file))) . '</td></tr>';
+    }
+    return $html . '</tbody></table></div>';
+}
+
+function restore_form(): string
+{
+    $files = glob(BACKUP_DIR . '/*.tar.gz') ?: [];
+    rsort($files);
+    $options = '';
+    foreach ($files as $file) {
+        $options .= '<option value="' . e($file) . '">' . e(basename($file)) . '</option>';
+    }
+    if ($options === '') {
+        $options = '<option value="">No backup available</option>';
+    }
+    return '<form method="post" class="inline-form">' . csrf_field() .
+        '<input type="hidden" name="action" value="restore-volume">' .
+        '<select name="backup" required>' . $options . '</select>' .
+        '<input name="target" placeholder="new-empty-volume" required>' .
+        '<button>Restore Backup</button>' .
+        '</form>';
+}
+
+function stats_grid(array $stats): string
+{
+    $html = '<div class="stats">';
+    foreach ($stats as $label => $value) {
+        $html .= '<div class="stat"><strong>' . e((string) $value) . '</strong><span>' . e($label) . '</span></div>';
+    }
+    return $html . '</div>';
+}
+
+function section(string $title, string $body): string
+{
+    return '<section><h2>' . e($title) . '</h2>' . $body . '</section>';
+}
+
+function post_button(string $action, array $fields, string $label, string $variant = ''): string
+{
+    $html = '<form method="post" class="button-form">' . csrf_field() . '<input type="hidden" name="action" value="' . e($action) . '">';
+    foreach ($fields as $key => $value) {
+        $html .= '<input type="hidden" name="' . e($key) . '" value="' . e((string) $value) . '">';
+    }
+    $class = $variant === '' ? '' : ' class="' . e($variant) . '"';
+    return $html . '<button' . $class . '>' . e($label) . '</button></form>';
+}
+
+function action_submit(string $action, string $label): string
+{
+    return '<button name="action" value="' . e($action) . '">' . e($label) . '</button>';
+}
+
+function status_badge(string $status): string
+{
+    $class = str_contains($status, 'running') ? 'ok' : (str_contains($status, 'exit') || str_contains($status, 'stop') ? 'warn' : '');
+    return '<span class="badge ' . e($class) . '">' . e($status === '' ? '-' : $status) . '</span>';
+}
+
+function csrf_field(): string
+{
+    return '<input type="hidden" name="csrf" value="' . e((string) ($_SESSION['csrf'] ?? '')) . '">';
+}
+
+function verify_csrf(): void
+{
+    $csrf = (string) ($_POST['csrf'] ?? '');
+    if ($csrf === '' || !hash_equals((string) ($_SESSION['csrf'] ?? ''), $csrf)) {
+        throw new RuntimeException('Invalid session token.');
+    }
+}
+
+function locked_content(): string
+{
+    return '<main class="auth"><h1>Dockan Panel</h1><p>Set <code>DOCKAN_UI_TOKEN</code> before starting the PHP server.</p><pre>export DOCKAN_UI_TOKEN="change-me"
+php -S 127.0.0.1:9090 index.php</pre></main>';
+}
+
+function login_content(?string $error): string
+{
+    return '<main class="auth"><h1>Dockan Panel</h1>' . ($error ? '<div class="alert danger">' . e($error) . '</div>' : '') .
+        '<form method="post"><label>Access token<input type="password" name="token" autofocus required></label><button>Login</button></form></main>';
+}
+
+function render_page(string $title, string $content, bool $with_nav, ?string $flash = null, ?string $error = null): void
+{
+    $nav = $with_nav ? nav_html() : '';
+    $messages = '';
+    if ($flash) {
+        $messages .= '<div class="alert">' . e($flash) . '</div>';
+    }
+    if ($error) {
+        $messages .= '<div class="alert danger">' . e($error) . '</div>';
+    }
+    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' . e($title) . ' - Dockan Panel</title><style>' . css() . '</style></head><body>' . $nav . '<main class="shell">' . $messages . $content . '</main></body></html>';
+}
+
+function nav_html(): string
+{
+    $items = [
+        'dashboard' => 'Dashboard',
+        'containers' => 'Containers',
+        'images' => 'Images',
+        'volumes' => 'Volumes',
+        'networks' => 'Networks',
+        'compose' => 'Compose',
+        'logs' => 'Logs',
+    ];
+    $html = '<header><a class="brand" href="?view=dashboard">Dockan Panel</a><nav>';
+    foreach ($items as $key => $label) {
+        $active = ($_GET['view'] ?? 'dashboard') === $key ? ' class="active"' : '';
+        $html .= '<a' . $active . ' href="?view=' . e($key) . '">' . e($label) . '</a>';
+    }
+    $html .= '</nav><form method="post">' . csrf_field() . '<button name="logout" value="1">Logout</button></form></header>';
+    return $html;
+}
+
+function page_title(string $view): string
+{
+    return ucwords(str_replace('-', ' ', $view));
+}
+
+function is_logged_in(): bool
+{
+    return ($_SESSION['dockan_ui_auth'] ?? false) === true;
+}
+
+function self_url(): string
+{
+    return strtok((string) ($_SERVER['REQUEST_URI'] ?? '/'), '?') ?: '/';
+}
+
+function ensure_storage(): void
+{
+    if (!is_dir(BACKUP_DIR)) {
+        mkdir(BACKUP_DIR, 0755, true);
+    }
+}
+
+function human_bytes(int $bytes): string
+{
+    $units = ['B', 'KB', 'MB', 'GB'];
+    $value = (float) $bytes;
+    foreach ($units as $unit) {
+        if ($value < 1024 || $unit === 'GB') {
+            return number_format($value, $unit === 'B' ? 0 : 1) . ' ' . $unit;
+        }
+        $value /= 1024;
+    }
+    return $bytes . ' B';
+}
+
+function e(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+function css(): string
+{
+    return <<<'CSS'
+:root {
+  color-scheme: light;
+  --bg: #f5f7fa;
+  --panel: #ffffff;
+  --ink: #17202a;
+  --muted: #667085;
+  --line: #d8dee8;
+  --accent: #1268b3;
+  --accent-ink: #ffffff;
+  --danger: #b42318;
+  --ok: #067647;
+  --warn: #b54708;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 15px;
+}
+header {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+.brand {
+  font-weight: 800;
+  color: var(--ink);
+  text-decoration: none;
+  white-space: nowrap;
+}
+nav {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  flex: 1;
+}
+nav a {
+  color: var(--muted);
+  text-decoration: none;
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+nav a.active, nav a:hover {
+  background: #e9f2fb;
+  color: var(--accent);
+}
+.shell {
+  width: min(1180px, calc(100vw - 32px));
+  margin: 24px auto 48px;
+}
+section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+h1, h2, h3 { margin: 0 0 14px; line-height: 1.2; }
+h2 { font-size: 19px; }
+button, input, select {
+  font: inherit;
+}
+button {
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  min-height: 36px;
+  padding: 0 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:hover { filter: brightness(0.96); }
+button.danger, .danger button, .alert.danger { background: var(--danger); color: #fff; }
+input, select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #fff;
+  color: var(--ink);
+}
+label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
+pre {
+  overflow: auto;
+  padding: 14px;
+  border-radius: 8px;
+  background: #111827;
+  color: #e5e7eb;
+  min-height: 54px;
+}
+.table-wrap { overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th, td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+th {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  max-width: 420px;
+  overflow-wrap: anywhere;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.button-form { display: inline; }
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.stat {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbfcfe;
+}
+.stat strong { display: block; font-size: 28px; }
+.stat span { color: var(--muted); }
+.badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #eef2f6;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.badge.ok { color: var(--ok); background: #dcfae6; }
+.badge.warn { color: var(--warn); background: #fef0c7; }
+.muted { color: var(--muted); }
+.alert {
+  border-radius: 8px;
+  background: #e9f2fb;
+  color: #164c7e;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  white-space: pre-wrap;
+}
+.run-form, .compose-form, .inline-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+.compose-form { grid-template-columns: 1fr auto; }
+.auth {
+  width: min(440px, calc(100vw - 32px));
+  margin: 12vh auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 22px;
+}
+.auth form { display: grid; gap: 14px; }
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (max-width: 760px) {
+  header { align-items: flex-start; flex-direction: column; padding: 12px 16px; }
+  header form { align-self: stretch; }
+  header form button { width: 100%; }
+  .stats, .run-form, .compose-form, .inline-form { grid-template-columns: 1fr; }
+  .shell { width: min(100vw - 20px, 1180px); margin-top: 12px; }
+}
+CSS;
+}
