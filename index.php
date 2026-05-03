@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.7';
+const APP_VERSION = 'v0.1.8';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -146,6 +146,8 @@ function handle_action(string $action, string $dockan): string
         'stop-container' => command_text(run_dockan($dockan, ['stop', required_post('name')])),
         'remove-container' => command_text(run_dockan($dockan, ['rm', required_post('name')])),
         'health-container' => command_text(run_dockan($dockan, ['health', required_post('name')])),
+        'start-container-app' => container_compose_action($dockan, 'up'),
+        'restart-container-app' => container_compose_action($dockan, 'redeploy'),
         'exec-container' => exec_container_command($dockan),
         'remove-image' => command_text(run_dockan($dockan, ['rmi', required_post('tag')])),
         'create-volume' => command_text(run_dockan($dockan, ['volume', 'create', required_post('name')])),
@@ -445,6 +447,15 @@ function compose_action(string $dockan, string $action): string
         throw new RuntimeException('dockan.yml not found.');
     }
     return command_text(run_dockan($dockan, ['compose', $action, '-f', $file]));
+}
+
+function container_compose_action(string $dockan, string $action): string
+{
+    $file = required_post('file');
+    if (!is_file($file)) {
+        throw new RuntimeException('dockan.yml not found.');
+    }
+    return command_text(run_command(array_merge(['env', 'DOCKAN_PORT_BIND_ADDR=0.0.0.0', $dockan], ['compose', $action, '-f', $file])));
 }
 
 function stack_save(): string
@@ -1823,11 +1834,7 @@ function containers_content(string $dockan): string
         $body .= '<td>' . e($row['PID'] ?? '') . '</td>';
         $body .= '<td>' . e($row['IMAGE'] ?? '') . '</td>';
         $body .= '<td>' . e($row['PORTS'] ?? '') . '</td>';
-        $body .= '<td class="actions">' .
-            post_button('health-container', ['name' => $name], 'Health') .
-            post_button('stop-container', ['name' => $name], 'Stop') .
-            post_button('remove-container', ['name' => $name], 'Remove', 'danger') .
-            '</td>';
+        $body .= '<td class="actions">' . container_action_buttons($name, $status) . '</td>';
         $body .= '</tr>';
     }
     if (!$rows) {
@@ -1865,9 +1872,7 @@ function container_content(string $dockan): string
             'Status' => $current['STATUS'] ?? '-',
         ]) .
         '<div class="actions detail-actions">' .
-        post_button('health-container', ['name' => $name], 'Health') .
-        post_button('stop-container', ['name' => $name], 'Stop') .
-        post_button('remove-container', ['name' => $name], 'Remove', 'danger') .
+        container_action_buttons($name, $status) .
         '<a class="button-link" href="?view=logs&name=' . rawurlencode($name) . '">Logs page</a>' .
         '<a class="button-link" href="?view=containers">Back</a>' .
         '</div>';
@@ -1899,6 +1904,48 @@ function container_content(string $dockan): string
         section('Quick Exec', $quickExec) .
         section('Inspect', '<pre>' . e($inspect) . '</pre>') .
         section('Logs', '<pre>' . e($logs) . '</pre>');
+}
+
+function container_action_buttons(string $name, string $status): string
+{
+    $html = '';
+    $composeFile = container_compose_file($name);
+    if ($composeFile !== null) {
+        if (in_array($status, ['stopped', 'exited'], true)) {
+            $html .= post_button('start-container-app', ['name' => $name, 'file' => $composeFile], 'Start App');
+        } elseif ($status === 'running') {
+            $html .= post_button('restart-container-app', ['name' => $name, 'file' => $composeFile], 'Restart App');
+        }
+    }
+    $html .= post_button('health-container', ['name' => $name], 'Health');
+    if ($status === 'running') {
+        $html .= post_button('stop-container', ['name' => $name], 'Stop');
+    }
+    $html .= post_button('remove-container', ['name' => $name], 'Remove', 'danger');
+    return $html;
+}
+
+function container_compose_file(string $name): ?string
+{
+    $name = clean_resource_name($name, 'container name');
+    $parts = explode('-', $name);
+    $ids = [];
+    for ($i = count($parts) - 1; $i >= 1; $i--) {
+        $ids[] = implode('-', array_slice($parts, 0, $i));
+    }
+    $ids[] = $name;
+    foreach (array_unique($ids) as $id) {
+        foreach ([
+            '/srv/dockan-apps/' . $id . '/dockan.yml',
+            '/srv/' . $id . '/dockan.yml',
+            STORE_APPS_DIR . '/' . $id . '/dockan.yml',
+        ] as $file) {
+            if (is_file($file)) {
+                return $file;
+            }
+        }
+    }
+    return null;
 }
 
 function images_content(string $dockan): string
