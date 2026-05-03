@@ -64,6 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 $content = match ($view) {
     'containers' => containers_content($dockan),
+    'container' => container_content($dockan),
     'images' => images_content($dockan),
     'volumes' => volumes_content($dockan),
     'networks' => networks_content($dockan),
@@ -81,6 +82,7 @@ function handle_action(string $action, string $dockan): string
         'stop-container' => command_text(run_dockan($dockan, ['stop', required_post('name')])),
         'remove-container' => command_text(run_dockan($dockan, ['rm', required_post('name')])),
         'health-container' => command_text(run_dockan($dockan, ['health', required_post('name')])),
+        'exec-container' => exec_container_command($dockan),
         'remove-image' => command_text(run_dockan($dockan, ['rmi', required_post('tag')])),
         'create-volume' => command_text(run_dockan($dockan, ['volume', 'create', required_post('name')])),
         'remove-volume' => command_text(run_dockan($dockan, ['volume', 'rm', required_post('name')])),
@@ -114,6 +116,19 @@ function run_image(string $dockan): string
     }
     $args[] = $image;
     return command_text(run_dockan($dockan, $args));
+}
+
+function exec_container_command(string $dockan): string
+{
+    $name = required_post('name');
+    $command = trim((string) ($_POST['command'] ?? ''));
+    if ($command === '') {
+        throw new RuntimeException('Command is empty.');
+    }
+    if (strlen($command) > 8000) {
+        throw new RuntimeException('Command is too large.');
+    }
+    return command_text(run_dockan($dockan, ['exec', $name, 'sh', '-lc', $command]));
 }
 
 function compose_action(string $dockan, string $action): string
@@ -292,7 +307,7 @@ function containers_content(string $dockan): string
         $name = $row['NAME'] ?? '';
         $status = strtolower($row['STATUS'] ?? '');
         $body .= '<tr>';
-        $body .= '<td><a href="?view=logs&name=' . rawurlencode($name) . '">' . e($name) . '</a></td>';
+        $body .= '<td><a href="?view=container&name=' . rawurlencode($name) . '">' . e($name) . '</a></td>';
         $body .= '<td>' . status_badge($status) . '</td>';
         $body .= '<td>' . e($row['PID'] ?? '') . '</td>';
         $body .= '<td>' . e($row['IMAGE'] ?? '') . '</td>';
@@ -309,6 +324,58 @@ function containers_content(string $dockan): string
     }
     $body .= '</tbody></table></div>';
     return section('Containers', $body) . section('Run Image', run_form(parse_table(command_or_empty($dockan, ['images']))));
+}
+
+function container_content(string $dockan): string
+{
+    $name = trim((string) ($_GET['name'] ?? $_POST['name'] ?? ''));
+    if ($name === '') {
+        return section('Container', '<p class="muted">No container selected.</p>');
+    }
+
+    $containers = parse_table(command_or_empty($dockan, ['ps', '-a']));
+    $current = null;
+    foreach ($containers as $row) {
+        if (($row['NAME'] ?? '') === $name) {
+            $current = $row;
+            break;
+        }
+    }
+    if (!$current) {
+        return section('Container', '<p class="muted">Container not found: ' . e($name) . '</p>');
+    }
+
+    $status = strtolower($current['STATUS'] ?? '');
+    $summary = '<div class="container-head"><div><h2>' . e($name) . '</h2><p class="muted">' . e($current['IMAGE'] ?? '') . '</p></div>' . status_badge($status) . '</div>' .
+        stats_grid([
+            'PID' => $current['PID'] ?? '-',
+            'Image' => $current['IMAGE'] ?? '-',
+            'Ports' => $current['PORTS'] ?? '-',
+            'Status' => $current['STATUS'] ?? '-',
+        ]) .
+        '<div class="actions detail-actions">' .
+        post_button('health-container', ['name' => $name], 'Health') .
+        post_button('stop-container', ['name' => $name], 'Stop') .
+        post_button('remove-container', ['name' => $name], 'Remove', 'danger') .
+        '<a class="button-link" href="?view=logs&name=' . rawurlencode($name) . '">Logs page</a>' .
+        '<a class="button-link" href="?view=containers">Back</a>' .
+        '</div>';
+
+    $command = trim((string) ($_POST['command'] ?? 'pwd && ls -la'));
+    $terminal = '<form method="post" class="terminal-form">' . csrf_field() .
+        '<input type="hidden" name="action" value="exec-container">' .
+        '<input type="hidden" name="name" value="' . e($name) . '">' .
+        '<label>Command inside container<textarea name="command" class="small-editor" spellcheck="false" required>' . e($command) . '</textarea><span class="help">Runs through <code>dockan exec ' . e($name) . ' sh -lc "..."</code>. This is command execution, not a fully interactive PTY yet.</span></label>' .
+        '<button>Run Command</button>' .
+        '</form>';
+
+    $inspect = command_or_empty($dockan, ['inspect', $name]);
+    $logs = command_or_empty($dockan, ['logs', $name]);
+
+    return section('Container', $summary) .
+        section('Terminal', $terminal) .
+        section('Inspect', '<pre>' . e($inspect) . '</pre>') .
+        section('Logs', '<pre>' . e($logs) . '</pre>');
 }
 
 function images_content(string $dockan): string
@@ -954,6 +1021,35 @@ th {
   flex-wrap: wrap;
   gap: 8px;
 }
+.detail-actions {
+  margin-top: 14px;
+}
+.container-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.container-head h2 {
+  margin-bottom: 4px;
+}
+.container-head p {
+  margin: 0;
+}
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--accent-dark);
+  font-weight: 800;
+  text-decoration: none;
+}
 .button-form { display: inline; }
 .stats {
   display: grid;
@@ -1002,6 +1098,10 @@ th {
 .stack-form {
   display: grid;
   gap: 14px;
+}
+.terminal-form {
+  display: grid;
+  gap: 12px;
 }
 .auth {
   width: min(440px, calc(100vw - 32px));
