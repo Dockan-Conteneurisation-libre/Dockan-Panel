@@ -1916,6 +1916,7 @@ function store_app_card(array $app, bool $storeInstalled): string
     $target = store_default_target($id);
     $installed = is_dir($target);
     $initials = store_initials($name);
+    $logo = store_app_logo($app);
     $imageTags = '';
     foreach ($requires as $image) {
         $imageTags .= '<code>' . e($image) . '</code>';
@@ -1935,11 +1936,54 @@ function store_app_card(array $app, bool $storeInstalled): string
         '</div></form>';
 
     return '<article class="store-card">' .
-        '<div class="store-card-head"><div class="store-logo">' . e($initials) . '</div><div><h3>' . e($name) . '</h3><div class="badge-row"><span class="badge ok">' . e($category) . '</span>' . ($port !== '' ? '<span class="badge">:' . e($port) . '</span>' : '') . ($installed ? '<span class="badge warn">installed</span>' : '') . '</div></div></div>' .
+        '<div class="store-card-head"><div class="store-logo">' . ($logo !== '' ? '<img src="' . e($logo) . '" alt="" loading="lazy">' : e($initials)) . '</div><div><h3>' . e($name) . '</h3><div class="badge-row"><span class="badge ok">' . e($category) . '</span>' . ($port !== '' ? '<span class="badge">:' . e($port) . '</span>' : '') . ($installed ? '<span class="badge warn">installed</span>' : '') . '</div></div></div>' .
         '<p>' . e($summary) . '</p>' .
         '<div class="store-images">' . $imageTags . '</div>' .
         $form .
         '</article>';
+}
+
+function store_app_logo(array $app): string
+{
+    $logo = trim((string) ($app['logo'] ?? ''));
+    if ($logo !== '' && preg_match('#^https://#', $logo)) {
+        return $logo;
+    }
+    $slug = trim((string) ($app['icon'] ?? ''));
+    if ($slug === '') {
+        $slug = store_icon_slug((string) ($app['id'] ?? ''));
+    }
+    if ($slug === '') {
+        return '';
+    }
+    return 'https://cdn.simpleicons.org/' . rawurlencode($slug);
+}
+
+function store_icon_slug(string $id): string
+{
+    return [
+        'bookstack' => 'bookstack',
+        'drawio' => 'diagramsdotnet',
+        'ghost' => 'ghost',
+        'gitea' => 'gitea',
+        'grafana' => 'grafana',
+        'hedgedoc' => 'hedgedoc',
+        'jellyfin' => 'jellyfin',
+        'libretranslate' => 'libretranslate',
+        'matomo' => 'matomo',
+        'miniflux' => 'miniflux',
+        'n8n' => 'n8n',
+        'nextcloud' => 'nextcloud',
+        'nginx-proxy-manager' => 'nginxproxymanager',
+        'paperless-ngx' => 'paperlessngx',
+        'prometheus' => 'prometheus',
+        'static-site' => 'caddy',
+        'syncthing' => 'syncthing',
+        'uptime-kuma' => 'uptimekuma',
+        'vaultwarden' => 'vaultwarden',
+        'wallabag' => 'wallabag',
+        'wordpress' => 'wordpress',
+    ][$id] ?? '';
 }
 
 function store_apps(): array
@@ -2479,7 +2523,7 @@ function security_headers(): void
     header('X-Frame-Options: DENY');
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: same-origin');
-    header("Content-Security-Policy: default-src 'self'; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+    header("Content-Security-Policy: default-src 'self'; img-src 'self' data: https://cdn.simpleicons.org https://miniflux.app; manifest-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
     if (is_https_request()) {
         header('Strict-Transport-Security: max-age=15552000; includeSubDomains');
     }
@@ -3450,6 +3494,11 @@ th {
   color: var(--accent-dark);
   font-weight: 900;
 }
+.store-logo img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
 .badge-row {
   display: flex;
   flex-wrap: wrap;
@@ -3515,7 +3564,7 @@ th {
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-@media (max-width: 760px) {
+@media (max-width: 1080px) {
   .topbar { width: min(100vw - 18px, 1180px); gap: 8px; min-height: 58px; }
   .brand { min-width: 0; }
   .brand span { display: inline; max-width: 42vw; overflow: hidden; text-overflow: ellipsis; }
