@@ -1605,6 +1605,7 @@ function dashboard_content(string $dockan): string
     $networks = parse_table(command_or_empty($dockan, ['network', 'ls']));
     $doctor = command_or_empty($dockan, ['doctor']);
     return section('Overview', stats_grid([
+        'Panel Version' => APP_VERSION,
         'Containers' => count($containers),
         'Images' => count($images),
         'Volumes' => count($volumes),
