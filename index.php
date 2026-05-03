@@ -109,12 +109,70 @@ function run_image(string $dockan): string
     $name = required_post('name');
     $image = required_post('image');
     $ports = trim((string) ($_POST['ports'] ?? ''));
+    $env = parse_multiline_values((string) ($_POST['env'] ?? ''));
+    $volumes = parse_multiline_values((string) ($_POST['volumes'] ?? ''));
+    $aliases = parse_multiline_values((string) ($_POST['aliases'] ?? ''));
+    $network = trim((string) ($_POST['network'] ?? ''));
+    $entrypoint = trim((string) ($_POST['entrypoint'] ?? ''));
+    $restart = trim((string) ($_POST['restart'] ?? ''));
+    $healthcheck = trim((string) ($_POST['healthcheck'] ?? ''));
+    $memory = trim((string) ($_POST['memory'] ?? ''));
+    $cpus = trim((string) ($_POST['cpus'] ?? ''));
+    $isolation = trim((string) ($_POST['isolation'] ?? ''));
+    $command = trim((string) ($_POST['command'] ?? ''));
     $args = ['run', '-d', '--name', $name];
     if ($ports !== '') {
-        $args[] = '-p';
-        $args[] = $ports;
+        foreach (parse_multiline_values($ports) as $port) {
+            $args[] = '-p';
+            $args[] = $port;
+        }
+    }
+    foreach ($env as $item) {
+        $args[] = '-e';
+        $args[] = $item;
+    }
+    foreach ($volumes as $item) {
+        $args[] = '-v';
+        $args[] = $item;
+    }
+    if ($network !== '') {
+        $args[] = '--network';
+        $args[] = $network;
+    }
+    foreach ($aliases as $item) {
+        $args[] = '--alias';
+        $args[] = $item;
+    }
+    if ($entrypoint !== '') {
+        $args[] = '--entrypoint';
+        $args[] = $entrypoint;
+    }
+    if ($restart !== '') {
+        $args[] = '--restart';
+        $args[] = $restart;
+    }
+    if ($healthcheck !== '') {
+        $args[] = '--healthcheck';
+        $args[] = $healthcheck;
+    }
+    if ($memory !== '') {
+        $args[] = '--memory';
+        $args[] = $memory;
+    }
+    if ($cpus !== '') {
+        $args[] = '--cpus';
+        $args[] = $cpus;
+    }
+    if (isset($_POST['gui'])) {
+        $args[] = '--gui';
+    }
+    if ($isolation !== '') {
+        $args[] = '--isolation=' . $isolation;
     }
     $args[] = $image;
+    foreach (parse_command_values($command) as $item) {
+        $args[] = $item;
+    }
     return command_text(run_dockan($dockan, $args));
 }
 
@@ -240,6 +298,28 @@ function required_post(string $key): string
     return $value;
 }
 
+function parse_multiline_values(string $text): array
+{
+    $values = [];
+    foreach (preg_split('/\R+/', trim($text)) ?: [] as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#')) {
+            continue;
+        }
+        $values[] = $line;
+    }
+    return $values;
+}
+
+function parse_command_values(string $text): array
+{
+    if ($text === '') {
+        return [];
+    }
+    $values = str_getcsv($text, ' ', '"', '\\');
+    return array_values(array_filter(array_map('trim', $values), static fn (string $value): bool => $value !== ''));
+}
+
 function run_dockan(string $dockan, array $args): array
 {
     $cmd = array_merge([$dockan], $args);
@@ -295,7 +375,7 @@ function dashboard_content(string $dockan): string
         'Volumes' => count($volumes),
         'Networks' => count($networks),
     ])) .
-    section('Quick Run', run_form($images)) .
+    section('Create Container', run_form($images)) .
     section('Doctor', '<pre>' . e($doctor) . '</pre>');
 }
 
@@ -323,7 +403,7 @@ function containers_content(string $dockan): string
         $body .= '<tr><td colspan="6" class="muted">No containers.</td></tr>';
     }
     $body .= '</tbody></table></div>';
-    return section('Containers', $body) . section('Run Image', run_form(parse_table(command_or_empty($dockan, ['images']))));
+    return section('Containers', $body) . section('Create Container', run_form(parse_table(command_or_empty($dockan, ['images']))));
 }
 
 function container_content(string $dockan): string
@@ -552,8 +632,20 @@ function run_form(array $images): string
         '<input type="hidden" name="action" value="run-image">' .
         '<label>Name<input name="name" placeholder="myapp" required></label>' .
         '<label>Image<select name="image" required>' . $options . '</select></label>' .
-        '<label>Port mapping<input name="ports" placeholder="8080:8080"></label>' .
-        '<button>Run</button>' .
+        '<label>Ports<textarea name="ports" class="mini-editor" spellcheck="false" placeholder="8080:8080&#10;8443:8443"></textarea><span class="help">One mapping per line, host:container.</span></label>' .
+        '<label>Volumes<textarea name="volumes" class="mini-editor" spellcheck="false" placeholder="app-data:/app/data&#10;/home/anar/site:/app/site:ro"></textarea><span class="help">One mount per line, source:container-path[:ro].</span></label>' .
+        '<label>Environment<textarea name="env" class="mini-editor" spellcheck="false" placeholder="PORT=8080&#10;APP_ENV=prod"></textarea><span class="help">One KEY=VALUE per line.</span></label>' .
+        '<label>Network<input name="network" placeholder="host or my-network"></label>' .
+        '<label>Aliases<textarea name="aliases" class="mini-editor" spellcheck="false" placeholder="web&#10;api"></textarea><span class="help">Optional names on a Dockan network.</span></label>' .
+        '<label>Entrypoint<input name="entrypoint" placeholder="/bin/sh"></label>' .
+        '<label>Command<input name="command" placeholder="-lc &quot;php -S 0.0.0.0:8080&quot;"></label>' .
+        '<label>Restart<select name="restart"><option value="">Image default</option><option value="no">no</option><option value="always">always</option><option value="on-failure">on-failure</option></select></label>' .
+        '<label>Healthcheck<input name="healthcheck" placeholder="CMD-SHELL curl -f http://127.0.0.1:8080/"></label>' .
+        '<label>Memory<input name="memory" placeholder="512m"></label>' .
+        '<label>CPUs<input name="cpus" placeholder="1.5"></label>' .
+        '<label>Isolation<select name="isolation"><option value="">auto</option><option value="none">none</option><option value="firejail">firejail</option><option value="bubblewrap">bubblewrap</option><option value="systemd-nspawn">systemd-nspawn</option><option value="chroot">chroot</option></select></label>' .
+        '<label class="check-row"><input type="checkbox" name="gui" value="1"> GUI sockets</label>' .
+        '<button>Create Container</button>' .
         '</form>';
 }
 
@@ -969,6 +1061,9 @@ textarea {
 .small-editor {
   min-height: 100px;
 }
+.mini-editor {
+  min-height: 78px;
+}
 input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
   outline: 3px solid #eef6f1;
@@ -1094,6 +1189,9 @@ th {
   align-items: end;
   margin-bottom: 16px;
 }
+.run-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
 .compose-form { grid-template-columns: 1fr auto; }
 .stack-form {
   display: grid;
@@ -1102,6 +1200,20 @@ th {
 .terminal-form {
   display: grid;
   gap: 12px;
+}
+.check-row {
+  align-self: end;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  font-weight: 800;
+}
+.check-row input {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
 }
 .auth {
   width: min(440px, calc(100vw - 32px));

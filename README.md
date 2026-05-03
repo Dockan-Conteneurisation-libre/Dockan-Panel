@@ -15,7 +15,7 @@ It can:
 - create volumes
 - back up volumes to local `storage/backups`
 - restore backups into a new empty volume
-- run an image with a name and optional port
+- create containers from local images with ports, volumes, environment variables, network, aliases, restart policy, healthcheck, CPU/RAM limits, GUI sockets, entrypoint, and command
 - run `dockan compose up`, `down`, `redeploy`, and `health` for a chosen `dockan.yml`
 - manage Portainer-style stacks from the UI by saving `dockan.yml` files, then deploying, stopping, redeploying, and checking health
 - import required stack images from a local Dockan registry folder before deployment
@@ -82,5 +82,9 @@ This UI executes the local `dockan` CLI as the current Linux user.
 The container terminal runs commands with `dockan exec <container> sh -lc`.
 It is useful for diagnostics and simple changes, but it is not a fully
 interactive PTY terminal yet.
+
+In the Containers page, click a container name to open its detail page. From
+there you can run commands inside it, read logs, inspect metadata, stop it,
+remove it, or run its healthcheck.
 
 Keep it bound to `127.0.0.1` unless you put it behind proper authentication, HTTPS, and firewall rules.
