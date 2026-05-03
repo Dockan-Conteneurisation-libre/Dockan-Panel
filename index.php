@@ -268,7 +268,7 @@ function terminal_start_socat(string $id, string $inner): array
     $output = $dir . '/output.log';
     $error = $dir . '/error.log';
     $ptyAddress = 'pty,raw,echo=0,link=' . $pty;
-    $execAddress = 'exec:' . $inner . ',pty,setsid,stderr,sigint,sane';
+    $execAddress = 'exec:' . $inner . ',pty,setsid,ctty,stderr,sigint,sane';
     $socat = 'socat ' . escapeshellarg($ptyAddress) . ' ' . escapeshellarg($execAddress);
     $background = close_extra_fds_shell() . '; setsid sh -c ' . escapeshellarg($socat) . ' >/dev/null 2>>' . escapeshellarg($error) . ' & echo $!';
     $result = run_command(['sh', '-lc', $background]);
@@ -1179,7 +1179,13 @@ function terminal_js(): string
     return <<<'JS'
 (() => {
   const ansi = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
-  const clean = (text) => text.replace(ansi, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const clean = (text) => text
+    .replace(ansi, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .filter((line) => !line.includes('nsenter: reassociate to namespaces failed') && !line.includes('[dockan] nsenter impossible'))
+    .join('\n');
   const api = async (panel, terminalAction, extra = {}) => {
     const body = new FormData();
     body.set('csrf', panel.dataset.csrf || '');
@@ -1202,6 +1208,7 @@ function terminal_js(): string
     let offset = 0;
     let timer = 0;
     let buffer = '';
+    let errors = 0;
     const setState = (text) => { state.textContent = text; };
     const append = (text) => {
       if (!text) return;
@@ -1214,6 +1221,7 @@ function terminal_js(): string
       if (!id) return;
       try {
         const data = await api(panel, 'read', { id, offset: String(offset) });
+        errors = 0;
         offset = data.offset || offset;
         append(data.output || '');
         setState(data.alive ? 'connected' : 'closed');
@@ -1222,10 +1230,14 @@ function terminal_js(): string
           timer = 0;
         }
       } catch (error) {
-        append('\n[terminal] ' + error.message + '\n');
+        errors += 1;
+        if (errors >= 2) {
+          append('\n[terminal] connection lost. Refresh the page or reconnect.\n');
+        }
         setState('error');
         clearInterval(timer);
         timer = 0;
+        id = '';
       }
     };
     const send = async (data) => {
@@ -1234,7 +1246,11 @@ function terminal_js(): string
         await api(panel, 'input', { id, data });
         setTimeout(poll, 50);
       } catch (error) {
-        append('\n[terminal] ' + error.message + '\n');
+        append('\n[terminal] connection lost. Refresh the page or reconnect.\n');
+        setState('error');
+        clearInterval(timer);
+        timer = 0;
+        id = '';
       }
     };
     start.addEventListener('click', async () => {
