@@ -250,7 +250,7 @@ function terminal_start_script(string $id, string $inner): array
     }
     $loop = 'while true; do cat ' . escapeshellarg($input) . '; sleep 0.05; done';
     $pty = 'TERM=xterm-256color script -qfec ' . escapeshellarg($inner) . ' ' . escapeshellarg($output);
-    $background = 'setsid sh -c ' . escapeshellarg($loop . ' | ' . $pty) . ' >/dev/null 2>>' . escapeshellarg($error) . ' & echo $!';
+    $background = close_extra_fds_shell() . '; setsid sh -c ' . escapeshellarg($loop . ' | ' . $pty) . ' >/dev/null 2>>' . escapeshellarg($error) . ' & echo $!';
     $result = run_command(['sh', '-lc', $background]);
     $pid = trim((string) $result['stdout']);
     if ((int) $result['code'] !== 0 || !preg_match('/^\d+$/', $pid)) {
@@ -270,7 +270,7 @@ function terminal_start_socat(string $id, string $inner): array
     $ptyAddress = 'pty,raw,echo=0,link=' . $pty;
     $execAddress = 'exec:' . $inner . ',pty,setsid,stderr,sigint,sane';
     $socat = 'socat ' . escapeshellarg($ptyAddress) . ' ' . escapeshellarg($execAddress);
-    $background = 'setsid sh -c ' . escapeshellarg($socat) . ' >/dev/null 2>>' . escapeshellarg($error) . ' & echo $!';
+    $background = close_extra_fds_shell() . '; setsid sh -c ' . escapeshellarg($socat) . ' >/dev/null 2>>' . escapeshellarg($error) . ' & echo $!';
     $result = run_command(['sh', '-lc', $background]);
     $pid = trim((string) $result['stdout']);
     if ((int) $result['code'] !== 0 || !preg_match('/^\d+$/', $pid)) {
@@ -285,7 +285,7 @@ function terminal_start_socat(string $id, string $inner): array
         throw new RuntimeException(trim((string) @file_get_contents($error)) ?: 'PTY device was not created.');
     }
     $reader = 'cat ' . escapeshellarg($pty) . ' >> ' . escapeshellarg($output);
-    $readerBackground = 'setsid sh -c ' . escapeshellarg($reader) . ' >/dev/null 2>>' . escapeshellarg($error) . ' & echo $!';
+    $readerBackground = close_extra_fds_shell() . '; setsid sh -c ' . escapeshellarg($reader) . ' >/dev/null 2>>' . escapeshellarg($error) . ' & echo $!';
     $readerResult = run_command(['sh', '-lc', $readerBackground]);
     $readerPid = trim((string) $readerResult['stdout']);
     if (preg_match('/^\d+$/', $readerPid)) {
@@ -528,6 +528,11 @@ function shell_command(array $cmd): string
     return implode(' ', array_map('escapeshellarg', $cmd));
 }
 
+function close_extra_fds_shell(): string
+{
+    return 'if [ -d /proc/$$/fd ]; then for fd in /proc/$$/fd/*; do n=${fd##*/}; case "$n" in 0|1|2) ;; *) eval "exec $n>&-";; esac; done; fi';
+}
+
 function command_text(array $result): string
 {
     $text = trim((string) $result['stdout'] . "\n" . (string) $result['stderr']);
@@ -604,7 +609,6 @@ function dashboard_content(string $dockan): string
         'Volumes' => count($volumes),
         'Networks' => count($networks),
     ])) .
-    section('Create Container', run_form($images)) .
     section('Doctor', '<pre>' . e($doctor) . '</pre>');
 }
 
