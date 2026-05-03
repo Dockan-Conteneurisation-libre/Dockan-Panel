@@ -40,6 +40,24 @@ Open:
 http://127.0.0.1:9090
 ```
 
+On a server, the default `dockan.yml` listens on all interfaces:
+
+```yaml
+command: php -S 0.0.0.0:9090 index.php
+```
+
+That means the panel can also be reached from the private network with:
+
+```text
+http://SERVER_PRIVATE_IP:9090
+```
+
+For a local-only panel, change the command to:
+
+```yaml
+command: php -S 127.0.0.1:9090 index.php
+```
+
 On first launch, create the first admin account in the setup page. There is no
 default password and no default token.
 
@@ -95,46 +113,27 @@ Internet -> HTTPS reverse proxy -> Dockan Panel
 Pangolin, Caddy, Nginx, Traefik, or Cloudflare Tunnel can be used as the HTTPS
 reverse proxy.
 
-### Pangolin On The Same Machine
+### Default Server Mode
 
-If Pangolin runs on the same server as Dockan Panel, keep the default local
-binding:
-
-```yaml
-command: php -S 127.0.0.1:9090 index.php
-```
-
-Then redeploy:
-
-```bash
-dockan compose redeploy
-```
-
-In Pangolin, set the internal/backend URL to:
-
-```text
-http://127.0.0.1:9090
-```
-
-Your public URL can then be something like:
-
-```text
-https://dockan.example.com
-```
-
-This is the safest and simplest setup because port `9090` is reachable only
-from the local machine.
-
-### Pangolin On Another Machine
-
-If Pangolin runs on another server, Dockan Panel must listen on the private
-network interface:
+By default, Dockan Panel listens on all interfaces:
 
 ```yaml
 command: php -S 0.0.0.0:9090 index.php
 ```
 
-Then redeploy:
+This makes it usable from another machine on the private network:
+
+```text
+http://192.168.x.x:9090
+```
+
+Use this when Pangolin or another reverse proxy is not installed on the same
+machine as Dockan Panel.
+
+### Pangolin On Another Machine
+
+If Pangolin runs on another server, keep the default `0.0.0.0` binding and
+redeploy:
 
 ```bash
 dockan compose redeploy
@@ -172,6 +171,36 @@ sudo firewall-cmd --reload
 ```
 
 Replace `PANGOLIN_IP` with the private IP of the Pangolin server.
+
+### Pangolin On The Same Machine
+
+If Pangolin runs on the same server as Dockan Panel, you can make the panel
+local-only:
+
+```yaml
+command: php -S 127.0.0.1:9090 index.php
+```
+
+Then redeploy:
+
+```bash
+dockan compose redeploy
+```
+
+In Pangolin, set the internal/backend URL to:
+
+```text
+http://127.0.0.1:9090
+```
+
+Your public URL can then be something like:
+
+```text
+https://dockan.example.com
+```
+
+This is the safest setup when Pangolin and Dockan Panel are on the same
+machine, because port `9090` is reachable only locally.
 
 ### Public HTTPS Notes
 
@@ -256,7 +285,9 @@ In the Containers page, click a container name to open its detail page. From
 there you can run commands inside it, read logs, inspect metadata, stop it,
 remove it, or run its healthcheck.
 
-Keep it bound to `127.0.0.1` unless you put it behind proper authentication, HTTPS, and firewall rules.
+If it listens on `0.0.0.0`, protect port `9090` with a firewall and expose the
+public access through HTTPS. If the reverse proxy runs on the same machine, use
+`127.0.0.1` for the panel command.
 
 Passkeys are verified server-side with the browser challenge and signature. They
 are still browser-dependent: if your browser cannot expose the WebAuthn public
