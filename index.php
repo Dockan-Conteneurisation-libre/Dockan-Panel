@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.9';
+const APP_VERSION = 'v0.1.10';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -1938,7 +1938,60 @@ function containers_content(string $dockan): string
         $body .= '<tr><td colspan="6" class="muted">No containers.</td></tr>';
     }
     $body .= '</tbody></table></div>';
-    return section('Containers', $body) . section('Create Container', run_form(parse_table(command_or_empty($dockan, ['images']))));
+    return section('Containers', $body) .
+        installed_store_apps_content($rows) .
+        section('Create Container', run_form(parse_table(command_or_empty($dockan, ['images']))));
+}
+
+function installed_store_apps_content(array $containerRows): string
+{
+    $containerByName = [];
+    foreach ($containerRows as $row) {
+        $name = (string) ($row['NAME'] ?? '');
+        if ($name !== '') {
+            $containerByName[$name] = $row;
+        }
+    }
+
+    $rows = '';
+    foreach (store_apps() as $app) {
+        $id = (string) ($app['id'] ?? '');
+        if ($id === '') {
+            continue;
+        }
+        $target = find_store_app_target($id);
+        $composeFile = $target . '/dockan.yml';
+        if (!is_file($composeFile)) {
+            continue;
+        }
+        $containers = store_app_compose_containers($composeFile, $id);
+        $matches = [];
+        foreach ($containers as $container) {
+            if (isset($containerByName[$container])) {
+                $matches[] = $containerByName[$container];
+            }
+        }
+        $status = $matches ? strtolower((string) ($matches[0]['STATUS'] ?? '')) : 'files ready';
+        $containerLinks = [];
+        foreach ($matches as $match) {
+            $containerName = (string) ($match['NAME'] ?? '');
+            if ($containerName !== '') {
+                $containerLinks[] = '<a href="?view=container&name=' . rawurlencode($containerName) . '">' . e($containerName) . '</a>';
+            }
+        }
+        if (!$containerLinks) {
+            $containerLinks[] = '<span class="muted">' . e(implode(', ', $containers)) . '</span>';
+        }
+        $actions = post_button('store-app-launch', ['app' => $id, 'target' => $target], $matches ? 'Launch' : 'Launch App') .
+            '<a class="button-link" href="?view=store">Store</a>';
+        $rows .= '<tr><td>' . e((string) ($app['name'] ?? $id)) . '</td><td>' . status_badge($status) . '</td><td>' . implode(', ', $containerLinks) . '</td><td class="path">' . e($composeFile) . '</td><td class="actions">' . $actions . '</td></tr>';
+    }
+
+    if ($rows === '') {
+        return '';
+    }
+    $table = '<div class="table-wrap"><table><thead><tr><th>App</th><th>Status</th><th>Container</th><th>Config</th><th>Actions</th></tr></thead><tbody>' . $rows . '</tbody></table></div>';
+    return section('Installed Store Apps', $table);
 }
 
 function container_content(string $dockan): string
@@ -2151,7 +2204,7 @@ function store_app_card(array $app, bool $storeInstalled): string
     $summary = (string) ($app['summary'] ?? '');
     $port = (string) ($app['default_port'] ?? '');
     $requires = is_array($app['requires'] ?? null) ? array_values(array_filter(array_map('strval', $app['requires']))) : [];
-    $target = store_default_target($id);
+    $target = find_store_app_target($id);
     $installed = is_file($target . '/dockan.yml');
     $autostart = store_app_service_enabled($id);
     $initials = store_initials($name);
@@ -2212,6 +2265,57 @@ function store_app_config_yaml(string $app, string $target, bool $installed): st
         return '';
     }
     return (string) file_get_contents($file);
+}
+
+function find_store_app_target(string $app): string
+{
+    foreach (store_app_target_candidates($app) as $target) {
+        if (is_file($target . '/dockan.yml')) {
+            return $target;
+        }
+    }
+    return store_default_target($app);
+}
+
+function store_app_target_candidates(string $app): array
+{
+    $candidates = [
+        store_default_target($app),
+        '/srv/dockan-apps/' . $app,
+    ];
+    $home = getenv('HOME') ?: '';
+    if ($home !== '') {
+        $candidates[] = rtrim($home, '/') . '/dockan-apps/' . $app;
+    }
+    return array_values(array_unique($candidates));
+}
+
+function store_app_compose_containers(string $file, string $fallbackName): array
+{
+    $yaml = is_file($file) ? (string) file_get_contents($file) : '';
+    $project = $fallbackName;
+    if (preg_match('/^name:\s*["\']?([A-Za-z0-9_.-]+)["\']?\s*$/m', $yaml, $match)) {
+        $project = $match[1];
+    }
+
+    $services = [];
+    if (preg_match('/^services:\s*$/m', $yaml, $section, PREG_OFFSET_CAPTURE)) {
+        $offset = $section[0][1] + strlen($section[0][0]);
+        $tail = substr($yaml, $offset);
+        foreach (preg_split('/\R/', $tail) ?: [] as $line) {
+            if (preg_match('/^\S/', $line)) {
+                break;
+            }
+            if (preg_match('/^  ([A-Za-z0-9_.-]+):\s*$/', $line, $match)) {
+                $services[] = $match[1];
+            }
+        }
+    }
+    if (!$services) {
+        $services[] = 'web';
+    }
+
+    return array_map(static fn (string $service): string => $project . '-' . $service, $services);
 }
 
 function store_app_service_enabled(string $app): bool
