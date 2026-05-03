@@ -789,6 +789,17 @@ function store_app_update(string $dockan, bool $redeploy): string
     if (!is_dir($target)) {
         throw new RuntimeException('App folder does not exist yet. Use Install first.');
     }
+    $updateCommand = $redeploy
+        ? implode("\n", [
+            'if ./dockan-store help 2>/dev/null | grep -q "dockan-store update"; then',
+            '  ./dockan-store update ' . escapeshellarg($app) . ' ' . escapeshellarg($target),
+            'else',
+            '  echo "Store update command unavailable in this release; using image refresh + compose up fallback."',
+            '  DOCKAN_STORE_FORCE_IMAGES=1 DOCKAN_STORE_REFRESH_IMAGES=1 ./dockan-store images ' . escapeshellarg($app),
+            '  ' . store_dockan_command($dockan, ['compose', 'up', '-f', $target . '/dockan.yml']),
+            'fi',
+        ])
+        : 'DOCKAN_STORE_FORCE_IMAGES=1 DOCKAN_STORE_REFRESH_IMAGES=1 ./dockan-store images ' . escapeshellarg($app);
     $script = implode("\n", [
         'set -eu',
         store_update_script(),
@@ -797,9 +808,7 @@ function store_app_update(string $dockan, bool $redeploy): string
         'test -d ' . escapeshellarg($store . '/apps/' . $app),
         'test -f ' . escapeshellarg($target . '/dockan.yml'),
         'cd ' . escapeshellarg($store),
-        $redeploy
-            ? './dockan-store update ' . escapeshellarg($app) . ' ' . escapeshellarg($target)
-            : 'DOCKAN_STORE_FORCE_IMAGES=1 DOCKAN_STORE_REFRESH_IMAGES=1 ./dockan-store images ' . escapeshellarg($app),
+        $updateCommand,
         shell_command(['printf', "Store app updated: %s -> %s\n", $app, $target]),
     ]);
     $output = command_text(run_command(['sh', '-lc', $script]));
