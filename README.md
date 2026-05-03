@@ -40,7 +40,8 @@ It can:
 
 ### With Dockan
 
-The panel can run as a Dockan app:
+The panel can run as a Dockan app. Install the `frankenphp` binary on the host
+first; the Dockan image is intentionally `scratch` and calls that local runtime.
 
 ```bash
 cd /path/to/Dockan-Panel
@@ -53,10 +54,11 @@ Open:
 http://127.0.0.1:9090
 ```
 
-On a server, the default `dockan.yml` listens on all interfaces:
+On a server, the default image runs FrankenPHP/Caddy and listens on all
+interfaces:
 
 ```yaml
-command: php -S 0.0.0.0:9090 index.php
+command: frankenphp run --config Caddyfile
 ```
 
 That means the panel can also be reached from the private network with:
@@ -65,10 +67,13 @@ That means the panel can also be reached from the private network with:
 http://SERVER_PRIVATE_IP:9090
 ```
 
-For a local-only panel, change the command to:
+For a local-only panel, override the bind address:
 
 ```yaml
-command: php -S 127.0.0.1:9090 index.php
+env:
+  - DOCKAN_BIN=dockan
+  - PORT=9090
+  - BIND=127.0.0.1
 ```
 
 On first launch, create the first admin account in the setup page. There is no
@@ -128,10 +133,11 @@ reverse proxy.
 
 ### Default Server Mode
 
-By default, Dockan Panel listens on all interfaces:
+By default, Dockan Panel uses the host `frankenphp` binary and listens on all
+interfaces:
 
 ```yaml
-command: php -S 0.0.0.0:9090 index.php
+command: frankenphp run --config Caddyfile
 ```
 
 This makes it usable from another machine on the private network:
@@ -145,7 +151,7 @@ machine as Dockan Panel.
 
 ### Pangolin On Another Machine
 
-If Pangolin runs on another server, keep the default `0.0.0.0` binding and
+If Pangolin runs on another server, keep the default `BIND=0.0.0.0` setting and
 redeploy:
 
 ```bash
@@ -191,7 +197,10 @@ If Pangolin runs on the same server as Dockan Panel, you can make the panel
 local-only:
 
 ```yaml
-command: php -S 127.0.0.1:9090 index.php
+env:
+  - DOCKAN_BIN=dockan
+  - PORT=9090
+  - BIND=127.0.0.1
 ```
 
 Then redeploy:
@@ -224,9 +233,9 @@ HTTPS. Browsers usually block passkeys on plain HTTP LAN addresses such as
 Keep strong admin passwords, enable 2FA or passkeys, and restrict access with a
 VPN, allowlist, or Pangolin access policy when possible.
 
-### Direct PHP
+### Direct PHP For Development
 
-You can also run it directly with PHP:
+You can also run it directly with PHP during local development:
 
 ```bash
 cd /path/to/Dockan-Panel
@@ -298,9 +307,9 @@ In the Containers page, click a container name to open its detail page. From
 there you can run commands inside it, read logs, inspect metadata, stop it,
 remove it, or run its healthcheck.
 
-If it listens on `0.0.0.0`, protect port `9090` with a firewall and expose the
-public access through HTTPS. If the reverse proxy runs on the same machine, use
-`127.0.0.1` for the panel command.
+If it listens on `BIND=0.0.0.0`, protect port `9090` with a firewall and expose the
+public access through HTTPS. If the reverse proxy runs on the same machine, set
+`BIND=127.0.0.1` for the panel service.
 
 Passkeys are verified server-side with the browser challenge and signature. They
 are still browser-dependent: if your browser cannot expose the WebAuthn public

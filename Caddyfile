@@ -1,0 +1,10 @@
+:{$PORT:9090} {
+	bind {$BIND:0.0.0.0}
+	root * .
+	encode zstd br gzip
+
+	@private path /storage* /README.md /Dockanfile /Caddyfile
+	respond @private 404
+
+	php_server
+}

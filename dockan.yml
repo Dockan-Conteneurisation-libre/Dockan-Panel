@@ -7,9 +7,11 @@ services:
       - 9090:9090
     env:
       - DOCKAN_BIN=dockan
+      - PORT=9090
+      - BIND=0.0.0.0
     volumes:
       - dockan-panel-data:/app/storage
-    command: php -S 0.0.0.0:9090 index.php
+    command: frankenphp run --config Caddyfile
     isolation: none
     restart: always
     healthcheck: CMD-SHELL curl -fsS http://127.0.0.1:9090/ >/dev/null
