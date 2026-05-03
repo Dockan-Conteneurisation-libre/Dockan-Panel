@@ -91,9 +91,10 @@ or register passkeys. Passkeys require `localhost`, `127.0.0.1`, or HTTPS.
 
 Open `Packages` to check the current Dockan version, preview dependency
 profiles, install host dependencies, prepare runtimes such as FrankenPHP or
-Node, and run release updates. System package installs use non-interactive
-`sudo`; configure passwordless permission for Dockan/package installs, or use
-the `Show Command` button and run the command on the host.
+Node, and run release updates. For one-click system installs, run the panel as a
+root/system service or grant passwordless permission for Dockan package actions.
+When the panel is launched as a normal user, the `Packages` page marks system
+automation as disabled and keeps `Preview`/`Show Command` available.
 
 This compose file uses `isolation: none` because the panel is an admin UI: it
 must call the host `dockan` CLI and manage the host Dockan containers.

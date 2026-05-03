@@ -508,13 +508,13 @@ function deps_profile_dry_run(string $dockan): string
 function deps_profile_install(string $dockan): string
 {
     $profile = clean_deps_profile(required_post('profile'));
-    return sudo_command_text(sudo_dockan_run($dockan, ['deps', 'install', $profile, '-y']));
+    return system_command_text(system_dockan_run($dockan, ['deps', 'install', $profile, '-y']));
 }
 
 function deps_profile_command(string $dockan): string
 {
     $profile = clean_deps_profile(required_post('profile'));
-    return sudo_dockan_command($dockan, ['deps', 'install', $profile, '-y']);
+    return system_dockan_command($dockan, ['deps', 'install', $profile, '-y']);
 }
 
 function deps_custom_dry_run(string $dockan): string
@@ -526,13 +526,13 @@ function deps_custom_dry_run(string $dockan): string
 function deps_custom_install(string $dockan): string
 {
     $packages = required_package_list();
-    return sudo_command_text(sudo_dockan_run($dockan, array_merge(['deps', 'install', '-y'], $packages)));
+    return system_command_text(system_dockan_run($dockan, array_merge(['deps', 'install', '-y'], $packages)));
 }
 
 function deps_custom_command(string $dockan): string
 {
     $packages = required_package_list();
-    return sudo_dockan_command($dockan, array_merge(['deps', 'install', '-y'], $packages));
+    return system_dockan_command($dockan, array_merge(['deps', 'install', '-y'], $packages));
 }
 
 function runtime_dry_run(string $dockan): string
@@ -544,20 +544,20 @@ function runtime_dry_run(string $dockan): string
 function runtime_install(string $dockan): string
 {
     $runtime = clean_runtime_ref(required_post('runtime'));
-    return sudo_command_text(sudo_dockan_run($dockan, ['deps', 'runtime', $runtime, '-y']));
+    return system_command_text(system_dockan_run($dockan, ['deps', 'runtime', $runtime, '-y']));
 }
 
 function runtime_command(string $dockan): string
 {
     $runtime = clean_runtime_ref(required_post('runtime'));
-    return sudo_dockan_command($dockan, ['deps', 'runtime', $runtime, '-y']);
+    return system_dockan_command($dockan, ['deps', 'runtime', $runtime, '-y']);
 }
 
 function update_run(string $dockan): string
 {
     $args = update_args();
     if (isset($_POST['system'])) {
-        return sudo_command_text(sudo_dockan_run($dockan, $args));
+        return system_command_text(system_dockan_run($dockan, $args));
     }
     return command_text(run_dockan($dockan, $args)) ?: 'Dockan update completed.';
 }
@@ -566,7 +566,7 @@ function update_command(string $dockan): string
 {
     $args = update_args();
     if (isset($_POST['system'])) {
-        return sudo_dockan_command($dockan, $args);
+        return system_dockan_command($dockan, $args);
     }
     return shell_command(array_merge([$dockan], $args));
 }
@@ -647,6 +647,22 @@ function sudo_dockan_command(string $dockan, array $args): string
     return 'sudo env "PATH=$HOME/.local/bin:$PATH" ' . shell_command(array_merge([$dockan], $args));
 }
 
+function system_dockan_command(string $dockan, array $args): string
+{
+    if (panel_is_root()) {
+        return shell_command(array_merge([$dockan], $args));
+    }
+    return sudo_dockan_command($dockan, $args);
+}
+
+function system_dockan_run(string $dockan, array $args): array
+{
+    if (panel_is_root()) {
+        return run_dockan($dockan, $args);
+    }
+    return sudo_dockan_run($dockan, $args);
+}
+
 function sudo_dockan_run(string $dockan, array $args): array
 {
     return run_command(array_merge(['sudo', '-n', 'env', 'PATH=' . sudo_path_value(), $dockan], $args));
@@ -659,13 +675,43 @@ function sudo_path_value(): string
     return ($home !== '' ? $home . '/.local/bin:' : '') . $path;
 }
 
-function sudo_command_text(array $result): string
+function system_command_text(array $result): string
 {
     $text = trim((string) $result['stdout'] . "\n" . (string) $result['stderr']);
     if ((int) $result['code'] !== 0 && stripos($text, 'sudo:') !== false && preg_match('/password|mot de passe|terminal/i', $text)) {
-        throw new RuntimeException('sudo cannot run from the panel without passwordless permission. Configure NOPASSWD for Dockan/package installs, or use Show Command and run it on the host.');
+        throw new RuntimeException('System automation is disabled because Dockan Panel is not running with root privileges and sudo needs a password. Start the production panel as a root/system service, or grant passwordless permission for Dockan package actions.');
     }
     return command_text($result) ?: 'Command completed.';
+}
+
+function panel_is_root(): bool
+{
+    if (function_exists('posix_geteuid')) {
+        return posix_geteuid() === 0;
+    }
+    return trim(command_output_or_empty(['id', '-u'])) === '0';
+}
+
+function panel_user_label(): string
+{
+    $uid = function_exists('posix_geteuid') ? (string) posix_geteuid() : trim(command_output_or_empty(['id', '-u']));
+    $name = trim(command_output_or_empty(['id', '-un']));
+    if ($uid === '') {
+        return $name !== '' ? $name : 'Unknown';
+    }
+    return ($name !== '' ? $name : 'uid') . ' (' . $uid . ')';
+}
+
+function system_automation_status(string $dockan): string
+{
+    if (panel_is_root()) {
+        return 'Enabled: panel is running as root.';
+    }
+    $result = sudo_dockan_run($dockan, ['version']);
+    if ((int) $result['code'] === 0) {
+        return 'Enabled: sudo can run Dockan without a password.';
+    }
+    return 'Disabled: panel is not root and sudo requires a password.';
 }
 
 function backup_volume(string $dockan, string $name): string
@@ -1615,6 +1661,8 @@ function packages_content(string $dockan): string
     $status = '<div class="table-wrap"><table><thead><tr><th>Item</th><th>Value</th></tr></thead><tbody>' .
         '<tr><td>Dockan binary</td><td class="path">' . e($dockanPath !== '' ? $dockanPath : $dockan) . '</td></tr>' .
         '<tr><td>Dockan version</td><td><pre>' . e($version) . '</pre></td></tr>' .
+        '<tr><td>Panel user</td><td>' . e(panel_user_label()) . '</td></tr>' .
+        '<tr><td>System automation</td><td>' . e(system_automation_status($dockan)) . '</td></tr>' .
         '<tr><td>PHP runtime</td><td>' . e(PHP_VERSION) . '</td></tr>' .
         '<tr><td>FrankenPHP</td><td><pre>' . e($frankenphp) . '</pre></td></tr>' .
         '</tbody></table></div>';
@@ -1627,7 +1675,7 @@ function packages_content(string $dockan): string
         action_submit('deps-profile-install', 'Run Install') .
         action_submit('deps-profile-command', 'Show Command') .
         '</div></form>' .
-        '<p class="help">Preview runs <code>dockan deps install --dry-run</code>. Run Install executes it from the panel with non-interactive sudo.</p>';
+        '<p class="help">Preview runs <code>dockan deps install --dry-run</code>. Run Install executes it directly when the panel is running as a system service.</p>';
 
     $runtimes = options_html(runtime_refs(), 'frankenphp');
     $runtimeForm = '<form method="post" class="package-form">' . csrf_field() .
