@@ -2213,43 +2213,50 @@ header {
   width: min(1180px, calc(100vw - 48px));
   margin: 0 auto;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px 18px;
-  padding: 12px 0;
+  gap: 12px;
+  min-height: 64px;
 }
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   font-weight: 800;
   color: var(--ink);
   text-decoration: none;
   white-space: nowrap;
-  font-size: 1.08rem;
+  font-size: 1rem;
   flex: 0 0 auto;
 }
 .brand img {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
 }
 nav {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 6px;
-  flex: 1 1 540px;
+  gap: 4px;
+  flex: 1 1 auto;
   min-width: 0;
-  font-size: 0.95rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  font-size: 0.88rem;
+}
+nav::-webkit-scrollbar {
+  display: none;
 }
 nav a {
   color: var(--muted);
   text-decoration: none;
-  padding: 8px 11px;
+  padding: 7px 8px;
   border-radius: 8px;
   font-weight: 700;
   line-height: 1.2;
+  flex: 0 0 auto;
 }
 nav a.active, nav a:hover {
   background: #eef6f1;
@@ -2258,6 +2265,11 @@ nav a.active, nav a:hover {
 header form {
   flex: 0 0 auto;
   margin: 0;
+}
+header form button {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 0.88rem;
 }
 .shell {
   width: min(1120px, calc(100vw - 48px));
@@ -2564,9 +2576,12 @@ code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (max-width: 760px) {
-  .topbar { align-items: flex-start; flex-direction: column; padding: 12px 0; width: min(100vw - 24px, 1180px); }
-  header form { align-self: stretch; }
-  header form button { width: 100%; }
+  .topbar { width: min(100vw - 18px, 1180px); gap: 8px; min-height: 58px; }
+  .brand span { display: none; }
+  .brand img { width: 34px; height: 34px; }
+  nav { font-size: 0.82rem; }
+  nav a { padding: 6px 7px; }
+  header form button { padding: 0 9px; font-size: 0.82rem; }
   .stats, .compose-form, .inline-form, .run-basic, .advanced-grid, .security-grid { grid-template-columns: 1fr; }
   .shell { width: min(100vw - 24px, 1120px); margin-top: 12px; }
 }
