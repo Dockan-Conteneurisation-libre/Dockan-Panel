@@ -1,6 +1,9 @@
-# Dockan PHP UI
+# Dockan Panel
 
-A small local web interface for Dockan, inspired by Portainer but intentionally simpler.
+A small standalone PHP web interface for Dockan.
+
+This project is separate from the Dockan CLI repository. It is meant to live in
+its own repository and call the local `dockan` command installed on the machine.
 
 It can:
 
@@ -20,7 +23,7 @@ It can:
 Set a token first:
 
 ```bash
-cd Dockan-Panel
+cd /path/to/Dockan-Panel
 export DOCKAN_UI_TOKEN="change-me"
 php -S 127.0.0.1:9090 index.php
 ```
@@ -32,6 +35,9 @@ http://127.0.0.1:9090
 ```
 
 Use the token from `DOCKAN_UI_TOKEN` to log in.
+
+If `dockan` is installed in `~/.local/bin`, the panel adds that directory to
+`PATH` automatically.
 
 ## Notes
 
