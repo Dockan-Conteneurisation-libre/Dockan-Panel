@@ -5,6 +5,7 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_STORAGE="$APP_DIR/storage"
 TARGET_STORAGE="/var/lib/dockan/volumes/dockan-panel-data"
 SERVICE_NAME="dockan-dockan-panel.service"
+ROOTFS_STORAGE="/var/lib/dockan/images/dockan-panel_latest.dockan/rootfs/app/storage"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Erreur: lance ce script avec sudo:"
@@ -21,6 +22,10 @@ stamp="$(date +%Y%m%d-%H%M%S)"
 backup="${TARGET_STORAGE}.backup-${stamp}"
 
 systemctl stop "$SERVICE_NAME" || true
+
+if findmnt -R "$ROOTFS_STORAGE" >/dev/null 2>&1; then
+  umount "$ROOTFS_STORAGE" || umount -l "$ROOTFS_STORAGE"
+fi
 
 if [[ -e "$TARGET_STORAGE" ]]; then
   mv "$TARGET_STORAGE" "$backup"
