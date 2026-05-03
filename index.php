@@ -1588,15 +1588,20 @@ function verify_csrf(): void
 
 function login_content(?string $error): string
 {
-    return '<main class="auth"><h1>Dockan Panel</h1>' . ($error ? '<div class="alert danger">' . e($error) . '</div>' : '') .
+    return '<main class="auth">' . auth_header('Dockan Panel') . ($error ? '<div class="alert danger">' . e($error) . '</div>' : '') .
         '<form method="post"><input type="hidden" name="login" value="1"><label>Username<input name="username" value="admin" autofocus required></label><label>Password<input type="password" name="password" required></label><label>2FA code<input name="totp" inputmode="numeric" placeholder="optional"></label><button>Login</button></form>' .
         '<div class="passkey-panel login-passkey"><button type="button" data-passkey-login>Login with Passkey</button><span class="muted" data-passkey-status></span></div></main>';
 }
 
 function setup_content(?string $error): string
 {
-    return '<main class="auth"><h1>Setup Admin</h1>' . ($error ? '<div class="alert danger">' . e($error) . '</div>' : '') .
+    return '<main class="auth">' . auth_header('Setup Admin') . ($error ? '<div class="alert danger">' . e($error) . '</div>' : '') .
         '<form method="post"><input type="hidden" name="setup" value="1"><label>Username<input name="username" value="admin" autofocus required></label><label>Password<input type="password" name="password" required></label><label>Confirm password<input type="password" name="confirm_password" required></label><button>Create Admin</button></form></main>';
+}
+
+function auth_header(string $title): string
+{
+    return '<div class="auth-logo"><img src="?asset=logo" alt=""><h1>' . e($title) . '</h1></div>';
 }
 
 function render_page(string $title, string $content, bool $with_nav, ?string $flash = null, ?string $error = null): void
@@ -2391,6 +2396,20 @@ th {
   border-radius: 8px;
   padding: 22px;
   box-shadow: var(--shadow);
+}
+.auth-logo {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  text-align: center;
+}
+.auth-logo img {
+  width: 72px;
+  height: 72px;
+}
+.auth-logo h1 {
+  margin: 0;
 }
 .auth form { display: grid; gap: 14px; }
 code {
