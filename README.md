@@ -34,6 +34,7 @@ It can:
 - run `dockan compose up`, `down`, `redeploy`, and `health` for a chosen `dockan.yml`
 - manage Portainer-style stacks from the UI by saving `dockan.yml` files, then deploying, stopping, redeploying, and checking health
 - import required stack images from a local Dockan registry folder before deployment
+- install and update Dockan Store from the panel, then install Store apps with one click
 - inspect Dockan, PHP, FrankenPHP, and Dockan Panel versions, preview dependency installs, install host packages/runtimes, run Dockan updates, and update the panel from GitHub
 - open a container detail page with actions, inspect output, logs, a live PTY terminal, and a one-shot exec fallback
 - manage admin users with password login, optional authenticator-app 2FA, and passkeys
@@ -110,6 +111,13 @@ For one-click system installs and panel updates, run the panel as a root/system
 service or grant passwordless permission for Dockan package and update actions.
 When the panel is launched as a normal user, the `Packages` page marks system
 automation as disabled and keeps `Preview`/`Show Command` available.
+
+Open `Store` to install or update Dockan Store from its latest GitHub release.
+The panel keeps the Store under `storage/store/Dockan-Store`, then app cards can
+install only the images and template needed by the selected app. In production,
+the default target is `/srv/dockan-apps/APP_ID`; non-root panels default to
+`$HOME/dockan-apps/APP_ID`. `Install + Launch` runs the app with
+`dockan compose up` after the template is installed.
 
 This compose file uses `isolation: none` because the panel is an admin UI: it
 must call the host `dockan` CLI and manage the host Dockan containers.

@@ -25,6 +25,9 @@ const STORAGE_DIR = __DIR__ . '/storage';
 const BACKUP_DIR = STORAGE_DIR . '/backups';
 const STACKS_DIR = STORAGE_DIR . '/stacks';
 const TERMINALS_DIR = STORAGE_DIR . '/terminals';
+const STORE_ROOT = STORAGE_DIR . '/store';
+const STORE_DIR = STORE_ROOT . '/Dockan-Store';
+const STORE_RELEASE_URL = 'https://github.com/Dockan-Conteneurisation-libre/Dockan-store/releases/latest/download/dockan-store.tar.gz';
 const AUTH_FILE = STORAGE_DIR . '/auth-users.json';
 const LOGIN_RATE_FILE = STORAGE_DIR . '/login-rate.json';
 
@@ -121,6 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 $content = match ($view) {
     'containers' => containers_content($dockan),
+    'store' => store_content($dockan),
     'container' => container_content($dockan),
     'images' => images_content($dockan),
     'volumes' => volumes_content($dockan),
@@ -172,6 +176,9 @@ function handle_action(string $action, string $dockan): string
         'update-command' => update_command($dockan),
         'panel-update-run' => panel_update_run(),
         'panel-update-command' => panel_update_command(),
+        'store-update-run' => store_update_run(),
+        'store-app-install' => store_app_install($dockan, false),
+        'store-app-deploy' => store_app_install($dockan, true),
         'add-user' => add_user_action(),
         'delete-user' => delete_user_action(),
         'set-password' => set_password_action(),
@@ -662,6 +669,76 @@ function panel_update_files(): array
         'dockan-logo.svg',
         'restore-prod-storage.sh',
     ];
+}
+
+function store_update_run(): string
+{
+    return command_text(run_command(['sh', '-lc', store_update_script()]));
+}
+
+function store_update_script(): string
+{
+    return implode("\n", [
+        'set -eu',
+        'base=' . escapeshellarg(STORE_ROOT),
+        'url=' . escapeshellarg(STORE_RELEASE_URL),
+        'tmp="$(mktemp -d)"',
+        'cleanup() { rm -rf "$tmp"; }',
+        'trap cleanup EXIT INT TERM',
+        'mkdir -p "$base"',
+        'curl -fsSL "$url" -o "$tmp/dockan-store.tar.gz"',
+        'rm -rf "$base/Dockan-Store"',
+        'tar -xzf "$tmp/dockan-store.tar.gz" -C "$base"',
+        'test -x "$base/Dockan-Store/dockan-store"',
+        'echo "Dockan Store installed in $base/Dockan-Store"',
+    ]);
+}
+
+function store_app_install(string $dockan, bool $deploy): string
+{
+    $app = clean_store_app(required_post('app'));
+    $target = clean_store_target(required_post('target'));
+    $store = STORE_DIR;
+    if (!is_file($store . '/dockan-store')) {
+        throw new RuntimeException('Dockan Store is not installed yet. Click Install / Update Store first.');
+    }
+    $script = implode("\n", [
+        'set -eu',
+        'cd ' . escapeshellarg($store),
+        'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
+        './dockan-store install ' . escapeshellarg($app) . ' ' . escapeshellarg($target),
+        $deploy ? shell_command([$dockan, 'compose', 'up', '-f', $target . '/dockan.yml']) : 'true',
+        shell_command(['printf', "Store app ready: %s -> %s\n", $app, $target]),
+    ]);
+    return command_text(run_command(['sh', '-lc', $script]));
+}
+
+function clean_store_app(string $app): string
+{
+    if (!preg_match('/^[A-Za-z0-9_.-]{1,64}$/', $app)) {
+        throw new RuntimeException('Invalid Store app.');
+    }
+    foreach (store_apps() as $item) {
+        if (($item['id'] ?? '') === $app) {
+            return $app;
+        }
+    }
+    throw new RuntimeException('Unknown Store app.');
+}
+
+function clean_store_target(string $target): string
+{
+    $target = trim($target);
+    if ($target === '' || str_contains($target, "\0") || str_contains($target, "\n") || str_contains($target, "\r")) {
+        throw new RuntimeException('Invalid target folder.');
+    }
+    if (!str_starts_with($target, '/')) {
+        throw new RuntimeException('Use an absolute target folder.');
+    }
+    if (preg_match('#(^|/)\.\.(/|$)#', $target)) {
+        throw new RuntimeException('Target folder cannot contain ..');
+    }
+    return rtrim($target, '/');
 }
 
 function clean_github_ref(string $ref): string
@@ -1756,6 +1833,151 @@ function networks_content(string $dockan): string
     return section('Networks', $body);
 }
 
+function store_content(string $dockan): string
+{
+    $apps = store_apps();
+    $installed = is_file(STORE_DIR . '/dockan-store');
+    $catalogSource = is_file(STORE_DIR . '/catalog.json') ? STORE_DIR . '/catalog.json' : 'Bundled fallback catalog';
+    $status = stats_grid([
+        'Store' => $installed ? 'Ready' : 'Install',
+        'Apps' => count($apps),
+        'Mode' => panel_is_root() ? 'System' : 'User',
+    ]) . '<div class="table-wrap store-status"><table><tbody>' .
+        '<tr><th>Store path</th><td class="path">' . e(STORE_DIR) . '</td></tr>' .
+        '<tr><th>Default app folder</th><td class="path">' . e(store_default_base()) . '</td></tr>' .
+        '<tr><th>Catalog</th><td class="path">' . e($catalogSource) . '</td></tr>' .
+        '</tbody></table></div>';
+    $install = '<div class="store-hero">' .
+        '<div><h2>Dockan Store</h2><p class="muted">Install ready app templates from the Store. The panel downloads the release with prebuilt images, imports only what the selected app needs, then can launch it with Dockan Compose.</p></div>' .
+        '<form method="post" class="store-update-form">' . csrf_field() .
+        '<input type="hidden" name="action" value="store-update-run">' .
+        '<button>Install / Update Store</button>' .
+        '<span class="help">Source: <code>' . e(STORE_RELEASE_URL) . '</code></span>' .
+        '</form></div>' .
+        '<p class="help">Production one-click installs work best when the panel runs as the Dockan system service/root.</p>';
+
+    $categories = [];
+    foreach ($apps as $app) {
+        $category = (string) ($app['category'] ?? 'app');
+        $categories[$category] = true;
+    }
+    $filters = '<div class="store-filter-row"><a class="button-link" href="?view=store">All apps</a>';
+    foreach (array_keys($categories) as $category) {
+        $filters .= '<a class="button-link" href="?view=store&category=' . rawurlencode($category) . '">' . e($category) . '</a>';
+    }
+    $filters .= '</div>';
+
+    $selectedCategory = trim((string) ($_GET['category'] ?? ''));
+    $cards = '<div class="store-grid">';
+    foreach ($apps as $app) {
+        if ($selectedCategory !== '' && ($app['category'] ?? '') !== $selectedCategory) {
+            continue;
+        }
+        $cards .= store_app_card($app, $installed);
+    }
+    $cards .= '</div>';
+
+    return section('Store Setup', $status . $install) . section('Apps', $filters . $cards);
+}
+
+function store_app_card(array $app, bool $storeInstalled): string
+{
+    $id = (string) ($app['id'] ?? '');
+    $name = (string) ($app['name'] ?? $id);
+    $category = (string) ($app['category'] ?? 'app');
+    $summary = (string) ($app['summary'] ?? '');
+    $port = (string) ($app['default_port'] ?? '');
+    $requires = is_array($app['requires'] ?? null) ? array_values(array_filter(array_map('strval', $app['requires']))) : [];
+    $target = store_default_target($id);
+    $initials = store_initials($name);
+    $imageTags = '';
+    foreach ($requires as $image) {
+        $imageTags .= '<code>' . e($image) . '</code>';
+    }
+    if ($imageTags === '') {
+        $imageTags = '<span class="muted">No image list.</span>';
+    }
+
+    $form = '<form method="post" class="store-card-form">' . csrf_field() .
+        '<input type="hidden" name="app" value="' . e($id) . '">' .
+        '<label>Install folder<input name="target" value="' . e($target) . '" required></label>' .
+        '<div class="actions">' .
+        '<button name="action" value="store-app-install"' . ($storeInstalled ? '' : ' disabled') . '>Install</button>' .
+        '<button name="action" value="store-app-deploy"' . ($storeInstalled ? '' : ' disabled') . '>Install + Launch</button>' .
+        '</div></form>';
+
+    return '<article class="store-card">' .
+        '<div class="store-card-head"><div class="store-logo">' . e($initials) . '</div><div><h3>' . e($name) . '</h3><div class="badge-row"><span class="badge ok">' . e($category) . '</span>' . ($port !== '' ? '<span class="badge">:' . e($port) . '</span>' : '') . '</div></div></div>' .
+        '<p>' . e($summary) . '</p>' .
+        '<div class="store-images">' . $imageTags . '</div>' .
+        $form .
+        '</article>';
+}
+
+function store_apps(): array
+{
+    $catalog = STORE_DIR . '/catalog.json';
+    if (is_file($catalog)) {
+        $data = json_decode((string) file_get_contents($catalog), true);
+        if (is_array($data) && is_array($data['apps'] ?? null)) {
+            return array_values(array_filter($data['apps'], static fn ($item): bool => is_array($item) && isset($item['id'])));
+        }
+    }
+    return store_fallback_apps();
+}
+
+function store_fallback_apps(): array
+{
+    return [
+        ['id' => 'bookstack', 'name' => 'BookStack', 'category' => 'wiki', 'summary' => 'Documentation wiki with MariaDB.', 'default_port' => 8087, 'requires' => ['bookstack:local', 'mariadb:local']],
+        ['id' => 'drawio', 'name' => 'draw.io', 'category' => 'diagrams', 'summary' => 'Diagram editor.', 'default_port' => 8089, 'requires' => ['drawio:local']],
+        ['id' => 'ghost', 'name' => 'Ghost', 'category' => 'publishing', 'summary' => 'Publishing platform with MySQL.', 'default_port' => 2368, 'requires' => ['ghost:local', 'mysql:local']],
+        ['id' => 'gitea', 'name' => 'Gitea', 'category' => 'git', 'summary' => 'Lightweight Git forge with PostgreSQL.', 'default_port' => 3000, 'requires' => ['gitea:local', 'postgres:local']],
+        ['id' => 'grafana', 'name' => 'Grafana', 'category' => 'monitoring', 'summary' => 'Dashboards and visualization for metrics.', 'default_port' => 3002, 'requires' => ['grafana:local']],
+        ['id' => 'hedgedoc', 'name' => 'HedgeDoc', 'category' => 'notes', 'summary' => 'Collaborative markdown notes with PostgreSQL.', 'default_port' => 3003, 'requires' => ['hedgedoc:local', 'postgres:local']],
+        ['id' => 'jellyfin', 'name' => 'Jellyfin', 'category' => 'media', 'summary' => 'Local media server.', 'default_port' => 8096, 'requires' => ['jellyfin:local']],
+        ['id' => 'libretranslate', 'name' => 'LibreTranslate', 'category' => 'ai', 'summary' => 'Local machine translation API and web UI.', 'default_port' => 5000, 'requires' => ['libretranslate:local']],
+        ['id' => 'matomo', 'name' => 'Matomo', 'category' => 'analytics', 'summary' => 'Web analytics with MariaDB.', 'default_port' => 8083, 'requires' => ['matomo:local', 'mariadb:local']],
+        ['id' => 'miniflux', 'name' => 'Miniflux', 'category' => 'rss', 'summary' => 'Minimal RSS reader with PostgreSQL.', 'default_port' => 8085, 'requires' => ['miniflux:local', 'postgres:local']],
+        ['id' => 'n8n', 'name' => 'n8n', 'category' => 'automation', 'summary' => 'Workflow automation with PostgreSQL.', 'default_port' => 5678, 'requires' => ['n8n:local', 'postgres:local']],
+        ['id' => 'nextcloud', 'name' => 'Nextcloud', 'category' => 'files', 'summary' => 'Private files, sync, calendar, contacts, and collaboration.', 'default_port' => 8081, 'requires' => ['nextcloud:local', 'mariadb:local', 'redis:local']],
+        ['id' => 'nginx-proxy-manager', 'name' => 'Nginx Proxy Manager', 'category' => 'proxy', 'summary' => 'Web UI for reverse proxy hosts and TLS certificates.', 'default_port' => 8181, 'requires' => ['nginx-proxy-manager:local']],
+        ['id' => 'paperless-ngx', 'name' => 'Paperless-ngx', 'category' => 'documents', 'summary' => 'Document management with OCR, PostgreSQL, and Redis.', 'default_port' => 8000, 'requires' => ['paperless-ngx:local', 'postgres:local', 'redis:local']],
+        ['id' => 'prometheus', 'name' => 'Prometheus', 'category' => 'monitoring', 'summary' => 'Metrics database and scraper.', 'default_port' => 9091, 'requires' => ['prometheus:local']],
+        ['id' => 'static-site', 'name' => 'Static Site', 'category' => 'web', 'summary' => 'Serve a static public folder with Caddy.', 'default_port' => 8088, 'requires' => ['caddy:local']],
+        ['id' => 'syncthing', 'name' => 'Syncthing', 'category' => 'sync', 'summary' => 'Peer-to-peer file synchronization.', 'default_port' => 8384, 'requires' => ['syncthing:local']],
+        ['id' => 'uptime-kuma', 'name' => 'Uptime Kuma', 'category' => 'monitoring', 'summary' => 'Monitoring dashboard for services and websites.', 'default_port' => 3001, 'requires' => ['uptime-kuma:local']],
+        ['id' => 'vaultwarden', 'name' => 'Vaultwarden', 'category' => 'passwords', 'summary' => 'Lightweight Bitwarden-compatible password manager.', 'default_port' => 8082, 'requires' => ['vaultwarden:local']],
+        ['id' => 'wallabag', 'name' => 'Wallabag', 'category' => 'read-it-later', 'summary' => 'Save articles and read them later.', 'default_port' => 8086, 'requires' => ['wallabag:local', 'postgres:local']],
+        ['id' => 'wordpress', 'name' => 'WordPress', 'category' => 'cms', 'summary' => 'Blog and CMS with MariaDB.', 'default_port' => 8080, 'requires' => ['wordpress:local', 'mariadb:local']],
+    ];
+}
+
+function store_default_base(): string
+{
+    if (panel_is_root()) {
+        return '/srv/dockan-apps';
+    }
+    $home = getenv('HOME') ?: '/tmp';
+    return rtrim($home, '/') . '/dockan-apps';
+}
+
+function store_default_target(string $app): string
+{
+    return store_default_base() . '/' . $app;
+}
+
+function store_initials(string $name): string
+{
+    preg_match_all('/[A-Za-z0-9]+/', $name, $matches);
+    $parts = $matches[0] ?? [];
+    $letters = '';
+    foreach (array_slice($parts, 0, 2) as $part) {
+        $letters .= strtoupper($part[0]);
+    }
+    return $letters !== '' ? $letters : 'A';
+}
+
 function packages_content(string $dockan): string
 {
     $version = command_or_empty($dockan, ['version']) ?: 'Unavailable';
@@ -2179,6 +2401,7 @@ function nav_html(): string
 {
     $items = [
         'dashboard' => 'Dashboard',
+        'store' => 'Store',
         'containers' => 'Containers',
         'images' => 'Images',
         'volumes' => 'Volumes',
@@ -2305,6 +2528,9 @@ function ensure_storage(): void
     }
     if (!is_dir(TERMINALS_DIR)) {
         mkdir(TERMINALS_DIR, 0700, true);
+    }
+    if (!is_dir(STORE_ROOT)) {
+        mkdir(STORE_ROOT, 0755, true);
     }
 }
 
@@ -3137,6 +3363,98 @@ th {
   height: 18px;
   min-height: 18px;
 }
+.store-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.45fr);
+  gap: 16px;
+  align-items: start;
+  margin-top: 16px;
+}
+.store-status {
+  margin-top: 12px;
+}
+.store-status table {
+  min-width: 0;
+}
+.store-hero p {
+  margin: 0;
+}
+.store-update-form {
+  display: grid;
+  gap: 8px;
+}
+.store-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.store-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.store-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 306px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcf9;
+  padding: 14px;
+}
+.store-card-head {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+.store-logo {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--accent-dark);
+  font-weight: 900;
+}
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.store-card h3 {
+  margin: 0 0 6px;
+  font-size: 1.02rem;
+}
+.store-card p {
+  margin: 0;
+  color: var(--muted);
+}
+.store-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+.store-images code {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 7px;
+  border-radius: 8px;
+  background: #eef2f6;
+  color: var(--ink);
+  font-size: 12px;
+}
+.store-card-form {
+  display: grid;
+  gap: 10px;
+}
 .auth {
   width: min(440px, calc(100vw - 32px));
   margin: 12vh auto;
@@ -3177,7 +3495,7 @@ code {
   .desktop-nav { display: none; }
   .mobile-nav { display: block; }
   header form button { padding: 0 9px; font-size: 0.82rem; }
-  .stats, .compose-form, .inline-form, .package-form, .run-basic, .advanced-grid, .security-grid { grid-template-columns: 1fr; }
+  .stats, .compose-form, .inline-form, .package-form, .run-basic, .advanced-grid, .security-grid, .store-hero, .store-grid { grid-template-columns: 1fr; }
   .shell { width: min(100vw - 24px, 1120px); margin-top: 12px; }
   section { padding: 14px; }
   textarea { min-height: 220px; }
