@@ -9,6 +9,7 @@ services:
       - DOCKAN_BIN=dockan
     volumes:
       - dockan-panel-data:/app/storage
+    command: php -S 127.0.0.1:9090 index.php
     isolation: none
     restart: always
     healthcheck: CMD-SHELL curl -fsS http://127.0.0.1:9090/ >/dev/null
