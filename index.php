@@ -1295,6 +1295,7 @@ function terminal_js(): string
       output.textContent = '';
       output.focus();
     });
+    output.addEventListener('click', () => output.focus());
     output.addEventListener('paste', (event) => {
       const text = event.clipboardData ? event.clipboardData.getData('text') : '';
       if (text) {
@@ -1303,7 +1304,12 @@ function terminal_js(): string
       }
     });
     output.addEventListener('keydown', (event) => {
-      if (!id) return;
+      if (!id) {
+        if (event.key === 'Backspace') {
+          event.preventDefault();
+        }
+        return;
+      }
       let data = '';
       if (event.ctrlKey && event.key.toLowerCase() === 'c') data = '\x03';
       else if (event.ctrlKey && event.key.toLowerCase() === 'd') data = '\x04';
