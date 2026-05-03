@@ -314,6 +314,26 @@ After restoring, redeploy the panel:
 dockan compose redeploy
 ```
 
+### Local Storage To Production Service
+
+If the panel was first launched directly from the repository and later moved to
+the production system service, the local `storage/` directory can be copied into
+the production Dockan volume with:
+
+```bash
+cd /path/to/Dockan-Panel
+sudo ./restore-prod-storage.sh
+```
+
+The script stops `dockan-dockan-panel.service`, unmounts any stale
+`/app/storage` bind mount, backs up the existing production volume as
+`/var/lib/dockan/volumes/dockan-panel-data.backup-YYYYMMDD-HHMMSS`, copies the
+local `storage/` data into `/var/lib/dockan/volumes/dockan-panel-data`, restores
+SELinux labels when `restorecon` is available, and starts the service again.
+
+Use this only for repair or migration. A normal production install should keep
+all panel data in `dockan-panel-data` from the beginning.
+
 ## Notes
 
 This UI executes the local `dockan` CLI as the current Linux user.
