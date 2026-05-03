@@ -18,7 +18,7 @@
 This project is separate from the Dockan CLI repository. It is meant to live in
 its own repository and call the local `dockan` command installed on the machine.
 
-Current panel version: `v0.1.12`.
+Current panel version: `v0.1.13`.
 
 It can:
 
@@ -120,7 +120,11 @@ the default target is `/srv/dockan-apps/APP_ID`; non-root panels default to
 `Update Images` and `Update Images + Redeploy` actions to force-refresh the
 bundled images from the latest Store release while keeping the installed
 `dockan.yml` and volumes. Redeploy uses the Store's `update` command when
-available.
+available. After the Store itself is updated, installed app cards compare the
+latest Store image checksums with the image state last applied by the panel and
+show `update available`, `images current`, or `update status unknown`. Apps
+installed before this tracking was introduced show unknown until their next
+panel-driven install or image update.
 
 This compose file uses `isolation: none` because the panel is an admin UI: it
 must call the host `dockan` CLI and manage the host Dockan containers.

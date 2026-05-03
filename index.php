@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.12';
+const APP_VERSION = 'v0.1.13';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -28,6 +28,7 @@ const TERMINALS_DIR = STORAGE_DIR . '/terminals';
 const STORE_ROOT = STORAGE_DIR . '/store';
 const STORE_DIR = STORE_ROOT . '/Dockan-Store';
 const STORE_APPS_DIR = STORE_DIR . '/apps';
+const STORE_IMAGE_STATE_FILE = STORAGE_DIR . '/store-image-state.json';
 const STORE_RELEASE_URL = 'https://github.com/Dockan-Conteneurisation-libre/Dockan-store/releases/latest/download/dockan-store.tar.gz';
 const STORE_FALLBACK_URL = 'https://github.com/Dockan-Conteneurisation-libre/Dockan-store/archive/refs/heads/main.tar.gz';
 const AUTH_FILE = STORAGE_DIR . '/auth-users.json';
@@ -762,6 +763,7 @@ function store_app_install(string $dockan, bool $deploy): string
     if ($deploy) {
         $output[] = command_text(run_command(['sh', '-lc', store_dockan_command($dockan, ['compose', 'up', '-f', $target . '/dockan.yml'])]));
     }
+    store_record_image_state(store_app_requires($app));
     return trim(implode("\n", array_filter($output)));
 }
 
@@ -800,7 +802,9 @@ function store_app_update(string $dockan, bool $redeploy): string
             : 'DOCKAN_STORE_FORCE_IMAGES=1 DOCKAN_STORE_REFRESH_IMAGES=1 ./dockan-store images ' . escapeshellarg($app),
         shell_command(['printf', "Store app updated: %s -> %s\n", $app, $target]),
     ]);
-    return command_text(run_command(['sh', '-lc', $script]));
+    $output = command_text(run_command(['sh', '-lc', $script]));
+    store_record_image_state(store_app_requires($app));
+    return $output;
 }
 
 function store_app_save_config(string $dockan, bool $redeploy): string
@@ -899,7 +903,11 @@ function store_app_autostart(string $dockan, bool $install): string
     $lines[] = '  ' . shell_command(['systemctl', 'enable', '--now', 'dockan-' . $app . '.service']);
     $lines[] = 'fi';
     $lines[] = shell_command(['printf', "Store app autostart enabled: %s -> %s\n", $app, $target]);
-    return system_command_text(system_shell_run(implode("\n", $lines)));
+    $output = system_command_text(system_shell_run(implode("\n", $lines)));
+    if ($install) {
+        store_record_image_state(store_app_requires($app));
+    }
+    return $output;
 }
 
 function store_app_disable_autostart(string $dockan): string
@@ -2240,6 +2248,7 @@ function store_app_card(array $app, bool $storeInstalled): string
     $initials = store_initials($name);
     $logo = store_app_logo($app);
     $configYaml = store_app_config_yaml($id, $target, $installed);
+    $updateBadge = store_app_update_badge($requires, $installed, $storeInstalled);
     $imageTags = '';
     foreach ($requires as $image) {
         $imageTags .= '<code>' . e($image) . '</code>';
@@ -2281,7 +2290,7 @@ function store_app_card(array $app, bool $storeInstalled): string
         '<div class="actions store-actions">' . $actions . '</div></form>';
 
     return '<article class="store-card">' .
-        '<div class="store-card-head"><div class="store-logo">' . ($logo !== '' ? '<img src="' . e($logo) . '" alt="" loading="lazy">' : e($initials)) . '</div><div><h3>' . e($name) . '</h3><div class="badge-row"><span class="badge ok">' . e($category) . '</span>' . ($port !== '' ? '<span class="badge">:' . e($port) . '</span>' : '') . ($installed ? '<span class="badge warn">files ready</span>' : '') . ($autostart ? '<span class="badge ok">starts on boot</span>' : '') . '</div></div></div>' .
+        '<div class="store-card-head"><div class="store-logo">' . ($logo !== '' ? '<img src="' . e($logo) . '" alt="" loading="lazy">' : e($initials)) . '</div><div><h3>' . e($name) . '</h3><div class="badge-row"><span class="badge ok">' . e($category) . '</span>' . ($port !== '' ? '<span class="badge">:' . e($port) . '</span>' : '') . ($installed ? '<span class="badge warn">files ready</span>' : '') . $updateBadge . ($autostart ? '<span class="badge ok">starts on boot</span>' : '') . '</div></div></div>' .
         '<p>' . e($summary) . '</p>' .
         '<div class="store-images">' . $imageTags . '</div>' .
         $form .
@@ -2295,6 +2304,138 @@ function store_app_config_yaml(string $app, string $target, bool $installed): st
         return '';
     }
     return (string) file_get_contents($file);
+}
+
+function store_app_requires(string $app): array
+{
+    foreach (store_apps() as $item) {
+        if (($item['id'] ?? '') === $app) {
+            return is_array($item['requires'] ?? null)
+                ? array_values(array_filter(array_map('strval', $item['requires'])))
+                : [];
+        }
+    }
+    return [];
+}
+
+function store_registry_images(): array
+{
+    $file = STORE_DIR . '/registry/index.tsv';
+    if (!is_file($file)) {
+        return [];
+    }
+
+    $images = [];
+    foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+        if ($line === '' || str_starts_with($line, '#')) {
+            continue;
+        }
+        $parts = explode("\t", $line);
+        if (count($parts) < 3) {
+            continue;
+        }
+        $tag = trim($parts[0]);
+        if ($tag === '') {
+            continue;
+        }
+        $images[$tag] = [
+            'archive' => trim($parts[1] ?? ''),
+            'sha' => trim($parts[2] ?? ''),
+            'size' => trim($parts[3] ?? ''),
+        ];
+    }
+    return $images;
+}
+
+function store_image_state(): array
+{
+    if (!is_file(STORE_IMAGE_STATE_FILE)) {
+        return [];
+    }
+    $data = json_decode((string) file_get_contents(STORE_IMAGE_STATE_FILE), true);
+    return is_array($data) ? $data : [];
+}
+
+function store_save_image_state(array $state): void
+{
+    if (!is_dir(STORAGE_DIR)) {
+        mkdir(STORAGE_DIR, 0775, true);
+    }
+    if (file_put_contents(STORE_IMAGE_STATE_FILE, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX) === false) {
+        throw new RuntimeException('Unable to save Store image update state.');
+    }
+}
+
+function store_record_image_state(array $requires): void
+{
+    $latest = store_registry_images();
+    if (!$latest || !$requires) {
+        return;
+    }
+
+    $state = store_image_state();
+    foreach ($requires as $image) {
+        if (!isset($latest[$image]['sha']) || $latest[$image]['sha'] === '') {
+            continue;
+        }
+        $state[$image] = [
+            'sha' => $latest[$image]['sha'],
+            'archive' => $latest[$image]['archive'] ?? '',
+            'recorded_at' => date(DATE_ATOM),
+        ];
+    }
+    store_save_image_state($state);
+}
+
+function store_app_image_status(array $requires): array
+{
+    $latest = store_registry_images();
+    if (!$latest || !$requires) {
+        return ['kind' => 'unknown', 'label' => 'update check unavailable'];
+    }
+
+    $state = store_image_state();
+    $known = 0;
+    $unknown = 0;
+    $outdated = 0;
+    foreach ($requires as $image) {
+        if (!isset($latest[$image]['sha']) || $latest[$image]['sha'] === '') {
+            $unknown++;
+            continue;
+        }
+        $known++;
+        $recorded = (string) ($state[$image]['sha'] ?? '');
+        if ($recorded === '') {
+            $unknown++;
+            continue;
+        }
+        if ($recorded !== $latest[$image]['sha']) {
+            $outdated++;
+        }
+    }
+
+    if ($known === 0 || $unknown > 0) {
+        return ['kind' => 'unknown', 'label' => 'update status unknown'];
+    }
+    if ($outdated > 0) {
+        return ['kind' => 'available', 'label' => 'update available'];
+    }
+    return ['kind' => 'current', 'label' => 'images current'];
+}
+
+function store_app_update_badge(array $requires, bool $installed, bool $storeInstalled): string
+{
+    if (!$installed || !$storeInstalled) {
+        return '';
+    }
+
+    $status = store_app_image_status($requires);
+    $class = match ($status['kind']) {
+        'available' => 'warn',
+        'current' => 'ok',
+        default => '',
+    };
+    return '<span class="badge' . ($class !== '' ? ' ' . $class : '') . '">' . e((string) $status['label']) . '</span>';
 }
 
 function find_store_app_target(string $app): string
