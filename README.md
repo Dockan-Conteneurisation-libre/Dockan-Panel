@@ -21,6 +21,7 @@ It can:
 - import required stack images from a local Dockan registry folder before deployment
 - open a container detail page with actions, inspect output, logs, a live PTY terminal, and a one-shot exec fallback
 - manage admin users with password login, optional authenticator-app 2FA, and passkeys
+- install in the browser as a local PWA, with the Dockan logo and standalone window mode
 
 ## Start
 
@@ -41,6 +42,12 @@ http://127.0.0.1:9090
 
 On first launch, create the first admin account in the setup page. There is no
 default password and no default token.
+
+The panel is also installable as a PWA from browsers that support it. Open the
+browser menu and choose the install/app shortcut option. PWA install works on
+`localhost`, `127.0.0.1`, or HTTPS. The service worker is network-first and does
+not cache authenticated admin pages, so container management still needs access
+to the running local panel.
 
 After login, open `Security` to add other admins, change passwords, enable 2FA,
 or register passkeys. Passkeys require `localhost`, `127.0.0.1`, or HTTPS.

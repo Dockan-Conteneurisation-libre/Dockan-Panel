@@ -28,6 +28,16 @@ if (($_GET['asset'] ?? '') === 'logo') {
     exit;
 }
 
+if (isset($_GET['manifest'])) {
+    pwa_manifest();
+    exit;
+}
+
+if (isset($_GET['service-worker'])) {
+    pwa_service_worker();
+    exit;
+}
+
 $dockan = getenv('DOCKAN_BIN') ?: 'dockan';
 $flash = null;
 $error = null;
@@ -1732,7 +1742,7 @@ function render_page(string $title, string $content, bool $with_nav, ?string $fl
     if ($error) {
         $messages .= '<div class="alert danger">' . e($error) . '</div>';
     }
-    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" type="image/svg+xml" href="?asset=logo"><title>' . e($title) . ' - Dockan Panel</title><style>' . css() . '</style></head><body>' . $nav . '<main class="shell">' . $messages . $content . '</main><script>' . terminal_js() . '</script></body></html>';
+    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#176b48"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Dockan Panel"><link rel="manifest" href="?manifest=1"><link rel="icon" type="image/svg+xml" href="?asset=logo"><link rel="apple-touch-icon" href="?asset=logo"><title>' . e($title) . ' - Dockan Panel</title><style>' . css() . '</style></head><body>' . $nav . '<main class="shell">' . $messages . $content . '</main><script>' . terminal_js() . pwa_js() . '</script></body></html>';
 }
 
 function nav_html(): string
@@ -1783,10 +1793,71 @@ function security_headers(): void
     header('X-Frame-Options: DENY');
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: same-origin');
-    header("Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+    header("Content-Security-Policy: default-src 'self'; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
     if (is_https_request()) {
         header('Strict-Transport-Security: max-age=15552000; includeSubDomains');
     }
+}
+
+function pwa_manifest(): void
+{
+    header('Content-Type: application/manifest+json');
+    header('Cache-Control: no-cache');
+    echo json_encode([
+        'name' => APP_NAME,
+        'short_name' => 'Dockan',
+        'description' => 'Local Dockan administration panel.',
+        'start_url' => './',
+        'scope' => './',
+        'display' => 'standalone',
+        'background_color' => '#f6f7f4',
+        'theme_color' => '#176b48',
+        'icons' => [
+            [
+                'src' => '?asset=logo',
+                'sizes' => 'any',
+                'type' => 'image/svg+xml',
+                'purpose' => 'any maskable',
+            ],
+        ],
+    ], JSON_UNESCAPED_SLASHES);
+}
+
+function pwa_service_worker(): void
+{
+    header('Content-Type: application/javascript; charset=utf-8');
+    header('Cache-Control: no-cache');
+    echo <<<'JS'
+const CACHE_NAME = 'dockan-panel-shell-v1';
+const OFFLINE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dockan Panel offline</title><style>body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f6f7f4;color:#17201b;display:grid;min-height:100vh;place-items:center}.box{width:min(420px,calc(100vw - 32px));background:white;border:1px solid #dfe5df;border-radius:8px;padding:22px;box-shadow:0 16px 40px rgba(23,32,27,.08)}h1{font-size:1.3rem;margin:0 0 8px}p{color:#56635c;margin:0}</style></head><body><div class="box"><h1>Dockan Panel is offline</h1><p>Reconnect to the local panel, then refresh this page.</p></div></body></html>`;
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(['?asset=logo'])));
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+  );
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', (event) => {
+  const request = event.request;
+  if (request.method !== 'GET') {
+    return;
+  }
+  if (request.mode === 'navigate') {
+    event.respondWith(fetch(request).catch(() => new Response(OFFLINE_HTML, {headers: {'Content-Type': 'text/html; charset=utf-8'}})));
+    return;
+  }
+  const url = new URL(request.url);
+  if (url.search === '?asset=logo') {
+    event.respondWith(caches.match(request).then((cached) => cached || fetch(request)));
+  }
+});
+JS;
 }
 
 function ensure_storage(): void
@@ -2168,6 +2239,21 @@ function terminal_js(): string
 JS;
 }
 
+function pwa_js(): string
+{
+    return <<<'JS'
+
+(() => {
+  if (!('serviceWorker' in navigator)) {
+    return;
+  }
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('?service-worker=1', {scope: './'}).catch(() => {});
+  });
+})();
+JS;
+}
+
 function e(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -2194,6 +2280,9 @@ function css(): string
   --shadow: 0 16px 40px rgba(23, 32, 27, 0.08);
 }
 * { box-sizing: border-box; }
+html {
+  overflow-x: hidden;
+}
 body {
   margin: 0;
   background: var(--bg);
@@ -2201,6 +2290,10 @@ body {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 15px;
   line-height: 1.6;
+  overflow-x: hidden;
+}
+img, svg, video {
+  max-width: 100%;
 }
 header {
   border-bottom: 1px solid var(--line);
@@ -2343,6 +2436,7 @@ label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
 }
 pre {
   overflow: auto;
+  max-width: 100%;
   padding: 14px;
   border-radius: 8px;
   background: var(--code);
@@ -2354,6 +2448,7 @@ pre {
 table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 720px;
 }
 th, td {
   text-align: left;
@@ -2378,11 +2473,15 @@ th {
   flex-wrap: wrap;
   gap: 8px;
 }
+.actions form {
+  margin: 0;
+}
 .detail-actions {
   margin-top: 14px;
 }
 .container-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -2579,11 +2678,17 @@ code {
   .topbar { width: min(100vw - 18px, 1180px); gap: 8px; min-height: 58px; }
   .brand span { display: none; }
   .brand img { width: 34px; height: 34px; }
-  nav { font-size: 0.82rem; }
+  nav { font-size: 0.82rem; scroll-snap-type: x proximity; }
+  nav a { scroll-snap-align: start; }
   nav a { padding: 6px 7px; }
   header form button { padding: 0 9px; font-size: 0.82rem; }
   .stats, .compose-form, .inline-form, .run-basic, .advanced-grid, .security-grid { grid-template-columns: 1fr; }
   .shell { width: min(100vw - 24px, 1120px); margin-top: 12px; }
+  section { padding: 14px; }
+  textarea { min-height: 220px; }
+  .live-terminal { min-height: 340px; max-height: 58vh; }
+  .auth { margin: 7vh auto; }
+  .actions button, .actions .button-link { flex: 1 1 auto; }
 }
 CSS;
 }
