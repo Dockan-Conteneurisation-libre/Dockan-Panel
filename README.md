@@ -81,6 +81,107 @@ On the Stacks page, fill `Required images` and `Registry folder`, then click
 each image. If the registry folder is empty, Dockan uses its default local
 registry.
 
+## Production Exposure
+
+Dockan Panel is an admin UI. Do not expose it directly to the Internet over
+plain HTTP.
+
+The recommended production shape is:
+
+```text
+Internet -> HTTPS reverse proxy -> Dockan Panel
+```
+
+Pangolin, Caddy, Nginx, Traefik, or Cloudflare Tunnel can be used as the HTTPS
+reverse proxy.
+
+### Pangolin On The Same Machine
+
+If Pangolin runs on the same server as Dockan Panel, keep the default local
+binding:
+
+```yaml
+command: php -S 127.0.0.1:9090 index.php
+```
+
+Then redeploy:
+
+```bash
+dockan compose redeploy
+```
+
+In Pangolin, set the internal/backend URL to:
+
+```text
+http://127.0.0.1:9090
+```
+
+Your public URL can then be something like:
+
+```text
+https://dockan.example.com
+```
+
+This is the safest and simplest setup because port `9090` is reachable only
+from the local machine.
+
+### Pangolin On Another Machine
+
+If Pangolin runs on another server, Dockan Panel must listen on the private
+network interface:
+
+```yaml
+command: php -S 0.0.0.0:9090 index.php
+```
+
+Then redeploy:
+
+```bash
+dockan compose redeploy
+```
+
+From the Dockan server, verify both addresses:
+
+```bash
+curl http://127.0.0.1:9090
+curl http://192.168.x.x:9090
+```
+
+In Pangolin, set the internal/backend URL to the Dockan server IP:
+
+```text
+http://192.168.x.x:9090
+```
+
+Replace `192.168.x.x` with the real private IP of the Dockan Panel server.
+
+Protect port `9090` with a firewall so only the Pangolin server can reach it.
+
+With `ufw`:
+
+```bash
+sudo ufw allow from PANGOLIN_IP to any port 9090 proto tcp
+sudo ufw deny 9090/tcp
+```
+
+With `firewalld`:
+
+```bash
+sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="PANGOLIN_IP" port port="9090" protocol="tcp" accept'
+sudo firewall-cmd --reload
+```
+
+Replace `PANGOLIN_IP` with the private IP of the Pangolin server.
+
+### Public HTTPS Notes
+
+Use HTTPS for the public URL. Passkeys work on `localhost`, `127.0.0.1`, or
+HTTPS. Browsers usually block passkeys on plain HTTP LAN addresses such as
+`http://192.168.x.x:9090`.
+
+Keep strong admin passwords, enable 2FA or passkeys, and restrict access with a
+VPN, allowlist, or Pangolin access policy when possible.
+
 ### Direct PHP
 
 You can also run it directly with PHP:
