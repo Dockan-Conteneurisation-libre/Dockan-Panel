@@ -417,7 +417,7 @@ function stacks_content(string $dockan): string
         '<label>Stack name<input name="name" value="' . e($nameValue) . '" placeholder="my-stack" required></label>' .
         '<label>dockan.yml<textarea name="yaml" class="stack-editor" spellcheck="false" required>' . e($yaml) . '</textarea></label>' .
         '<label>Required images<textarea name="required_images" class="small-editor" spellcheck="false" placeholder="myapp:latest&#10;mariadb:local">' . e(implode("\n", $requiredImages)) . '</textarea></label>' .
-        '<label>Registry folder<input name="registry_dir" value="' . e($registryDir) . '" placeholder="/srv/dockan-registry or empty for default"></label>' .
+        '<label>Registry folder<input name="registry_dir" value="' . e($registryDir) . '" placeholder="/home/anar/dockan-registry or empty for default"><span class="help">Local folder where Dockan looks for required images. Example: create it with <code>mkdir -p ~/dockan-registry</code>, then fill <code>/home/anar/dockan-registry</code>. The folder must already contain images pushed with <code>dockan push myapp:latest /home/anar/dockan-registry</code>.</span></label>' .
         '<div class="actions"><button name="action" value="stack-save">Save Stack</button>' .
         action_submit('stack-import-required', 'Import Required Images') .
         ($selected !== '' ? action_submit('stack-up', 'Deploy') . action_submit('stack-redeploy', 'Redeploy') . action_submit('stack-health', 'Health') : '') .
@@ -907,6 +907,16 @@ input:focus, select:focus, textarea:focus {
   outline: 3px solid #eef6f1;
 }
 label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
+.help {
+  display: block;
+  max-width: 820px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.help code {
+  color: var(--accent-dark);
+}
 pre {
   overflow: auto;
   padding: 14px;
