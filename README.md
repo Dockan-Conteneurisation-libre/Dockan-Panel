@@ -55,6 +55,18 @@ Open:
 http://127.0.0.1:9090
 ```
 
+For production, install the same Dockan app as a system service with Dockan:
+
+```bash
+sudo dockan service install -f /path/to/Dockan-Panel/dockan.yml --name dockan-panel
+sudo systemctl daemon-reload
+sudo systemctl enable --now dockan-dockan-panel.service
+```
+
+This keeps Dockan Panel managed by Dockan while starting it as a root/system
+service. In that mode the `Packages` page can run host package installs and
+runtime updates directly.
+
 On a server, the default image runs FrankenPHP/Caddy and listens on all
 interfaces:
 
