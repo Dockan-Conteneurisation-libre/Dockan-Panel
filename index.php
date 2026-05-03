@@ -7,6 +7,7 @@ const APP_NAME = 'Dockan Panel';
 const STORAGE_DIR = __DIR__ . '/storage';
 const BACKUP_DIR = STORAGE_DIR . '/backups';
 const STACKS_DIR = STORAGE_DIR . '/stacks';
+const TERMINALS_DIR = STORAGE_DIR . '/terminals';
 
 ensure_storage();
 
@@ -50,6 +51,11 @@ if (!is_logged_in()) {
 
 if (empty($_SESSION['csrf'])) {
     $_SESSION['csrf'] = bin2hex(random_bytes(24));
+}
+
+if (isset($_GET['terminal_api'])) {
+    handle_terminal_api($dockan);
+    exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
@@ -189,6 +195,162 @@ function exec_container_command(string $dockan): string
     return command_text(run_dockan($dockan, ['exec', $name, 'sh', '-lc', $command]));
 }
 
+function handle_terminal_api(string $dockan): void
+{
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        verify_csrf();
+        $action = required_post('terminal_action');
+        $payload = match ($action) {
+            'start' => terminal_start($dockan, required_post('name')),
+            'read' => terminal_read(required_post('id'), (int) ($_POST['offset'] ?? 0)),
+            'input' => terminal_input(required_post('id'), (string) ($_POST['data'] ?? '')),
+            'stop' => terminal_stop(required_post('id')),
+            default => throw new RuntimeException('Unknown terminal action.'),
+        };
+        json_response(['ok' => true] + $payload);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        json_response(['ok' => false, 'error' => $e->getMessage()]);
+    }
+}
+
+function terminal_start(string $dockan, string $name): array
+{
+    clean_resource_name($name, 'container name');
+    $id = bin2hex(random_bytes(12));
+    $dir = terminal_dir($id);
+    if (!mkdir($dir, 0700, true)) {
+        throw new RuntimeException('Unable to create terminal session.');
+    }
+    $output = $dir . '/output.log';
+    $error = $dir . '/error.log';
+    touch($output);
+    touch($error);
+    file_put_contents($dir . '/container', $name);
+
+    $inner = shell_command(array_merge([$dockan], ['exec', $name, 'sh', '-li']));
+    if (binary_exists('socat')) {
+        return terminal_start_socat($id, $inner);
+    }
+    if (binary_exists('script')) {
+        return terminal_start_script($id, $inner);
+    }
+    throw new RuntimeException('A live PTY terminal requires either "socat" or the util-linux "script" command.');
+}
+
+function terminal_start_script(string $id, string $inner): array
+{
+    $dir = terminal_dir_from_id($id);
+    $input = $dir . '/input.fifo';
+    $output = $dir . '/output.log';
+    $error = $dir . '/error.log';
+    if (!make_fifo($input)) {
+        throw new RuntimeException('Unable to create terminal input pipe.');
+    }
+    $loop = 'while true; do cat ' . escapeshellarg($input) . '; sleep 0.05; done';
+    $pty = 'TERM=xterm-256color script -qfec ' . escapeshellarg($inner) . ' ' . escapeshellarg($output);
+    $background = 'setsid sh -c ' . escapeshellarg($loop . ' | ' . $pty) . ' >/dev/null 2>>' . escapeshellarg($error) . ' & echo $!';
+    $result = run_command(['sh', '-lc', $background]);
+    $pid = trim((string) $result['stdout']);
+    if ((int) $result['code'] !== 0 || !preg_match('/^\d+$/', $pid)) {
+        throw new RuntimeException(trim((string) $result['stderr']) ?: 'Unable to start terminal process.');
+    }
+    file_put_contents($dir . '/pid', $pid);
+    usleep(180000);
+    return terminal_read($id, 0) + ['id' => $id];
+}
+
+function terminal_start_socat(string $id, string $inner): array
+{
+    $dir = terminal_dir_from_id($id);
+    $pty = $dir . '/terminal.pty';
+    $output = $dir . '/output.log';
+    $error = $dir . '/error.log';
+    $ptyAddress = 'pty,raw,echo=0,link=' . $pty;
+    $execAddress = 'exec:' . $inner . ',pty,setsid,stderr,sigint,sane';
+    $socat = 'socat ' . escapeshellarg($ptyAddress) . ' ' . escapeshellarg($execAddress);
+    $background = 'setsid sh -c ' . escapeshellarg($socat) . ' >/dev/null 2>>' . escapeshellarg($error) . ' & echo $!';
+    $result = run_command(['sh', '-lc', $background]);
+    $pid = trim((string) $result['stdout']);
+    if ((int) $result['code'] !== 0 || !preg_match('/^\d+$/', $pid)) {
+        throw new RuntimeException(trim((string) $result['stderr']) ?: 'Unable to start terminal process.');
+    }
+    file_put_contents($dir . '/pid', $pid);
+    $deadline = microtime(true) + 2.0;
+    while (!file_exists($pty) && microtime(true) < $deadline) {
+        usleep(50000);
+    }
+    if (!file_exists($pty)) {
+        throw new RuntimeException(trim((string) @file_get_contents($error)) ?: 'PTY device was not created.');
+    }
+    $reader = 'cat ' . escapeshellarg($pty) . ' >> ' . escapeshellarg($output);
+    $readerBackground = 'setsid sh -c ' . escapeshellarg($reader) . ' >/dev/null 2>>' . escapeshellarg($error) . ' & echo $!';
+    $readerResult = run_command(['sh', '-lc', $readerBackground]);
+    $readerPid = trim((string) $readerResult['stdout']);
+    if (preg_match('/^\d+$/', $readerPid)) {
+        file_put_contents($dir . '/reader.pid', $readerPid);
+    }
+    usleep(180000);
+    return terminal_read($id, 0) + ['id' => $id];
+}
+
+function terminal_read(string $id, int $offset): array
+{
+    $dir = terminal_dir_from_id($id);
+    $output = $dir . '/output.log';
+    $error = $dir . '/error.log';
+    $size = is_file($output) ? filesize($output) : 0;
+    if ($offset < 0 || $offset > $size) {
+        $offset = 0;
+    }
+    $chunk = '';
+    if ($size > $offset) {
+        $chunk = file_get_contents($output, false, null, $offset, 65536) ?: '';
+        $offset += strlen($chunk);
+    }
+    if ($chunk === '' && is_file($error) && filesize($error) > 0) {
+        $chunk = file_get_contents($error) ?: '';
+    }
+    return ['output' => $chunk, 'offset' => $offset, 'alive' => terminal_alive($id)];
+}
+
+function terminal_input(string $id, string $data): array
+{
+    $dir = terminal_dir_from_id($id);
+    if ($data === '') {
+        return ['written' => 0];
+    }
+    if (strlen($data) > 4096) {
+        throw new RuntimeException('Terminal input is too large.');
+    }
+    if (!terminal_alive($id)) {
+        throw new RuntimeException('Terminal session is not running.');
+    }
+    $target = file_exists($dir . '/terminal.pty') ? $dir . '/terminal.pty' : $dir . '/input.fifo';
+    $handle = @fopen($target, 'wb');
+    if (!$handle) {
+        throw new RuntimeException('Unable to open terminal input.');
+    }
+    $written = fwrite($handle, $data);
+    fclose($handle);
+    return ['written' => (int) $written];
+}
+
+function terminal_stop(string $id): array
+{
+    $dir = terminal_dir_from_id($id);
+    $pid = terminal_pid($id);
+    if ($pid > 0) {
+        run_command(['sh', '-lc', 'kill -TERM -' . (int) $pid . ' 2>/dev/null || kill -TERM ' . (int) $pid . ' 2>/dev/null || true']);
+    }
+    $readerPid = trim((string) @file_get_contents($dir . '/reader.pid'));
+    if (preg_match('/^\d+$/', $readerPid)) {
+        run_command(['sh', '-lc', 'kill -TERM -' . (int) $readerPid . ' 2>/dev/null || kill -TERM ' . (int) $readerPid . ' 2>/dev/null || true']);
+    }
+    return ['stopped' => true, 'output' => "\n[terminal closed]\n", 'offset' => is_file($dir . '/output.log') ? filesize($dir . '/output.log') : 0, 'alive' => false];
+}
+
 function compose_action(string $dockan, string $action): string
 {
     $file = required_post('file');
@@ -320,6 +482,14 @@ function parse_command_values(string $text): array
     return array_values(array_filter(array_map('trim', $values), static fn (string $value): bool => $value !== ''));
 }
 
+function clean_resource_name(string $name, string $label): string
+{
+    if (!preg_match('/^[A-Za-z0-9_.-]{1,96}$/', $name)) {
+        throw new RuntimeException('Invalid ' . $label . '.');
+    }
+    return $name;
+}
+
 function run_dockan(string $dockan, array $args): array
 {
     $cmd = array_merge([$dockan], $args);
@@ -328,7 +498,7 @@ function run_dockan(string $dockan, array $args): array
 
 function run_command(array $cmd): array
 {
-    $command = implode(' ', array_map('escapeshellarg', $cmd));
+    $command = shell_command($cmd);
     $home = getenv('HOME') ?: '';
     $oldPath = getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin';
     if ($home !== '') {
@@ -353,6 +523,11 @@ function run_command(array $cmd): array
     return ['code' => $code, 'stdout' => $stdout, 'stderr' => $stderr, 'command' => $command];
 }
 
+function shell_command(array $cmd): string
+{
+    return implode(' ', array_map('escapeshellarg', $cmd));
+}
+
 function command_text(array $result): string
 {
     $text = trim((string) $result['stdout'] . "\n" . (string) $result['stderr']);
@@ -360,6 +535,60 @@ function command_text(array $result): string
         throw new RuntimeException($text === '' ? 'Command failed.' : $text);
     }
     return $text;
+}
+
+function binary_exists(string $name): bool
+{
+    $result = run_command(['sh', '-lc', 'command -v ' . escapeshellarg($name) . ' >/dev/null 2>&1']);
+    return (int) $result['code'] === 0;
+}
+
+function make_fifo(string $path): bool
+{
+    if (function_exists('posix_mkfifo')) {
+        return @posix_mkfifo($path, 0600);
+    }
+    $result = run_command(['mkfifo', $path]);
+    return (int) $result['code'] === 0;
+}
+
+function terminal_dir(string $id): string
+{
+    return TERMINALS_DIR . '/' . $id;
+}
+
+function terminal_dir_from_id(string $id): string
+{
+    if (!preg_match('/^[a-f0-9]{24}$/', $id)) {
+        throw new RuntimeException('Invalid terminal session.');
+    }
+    $dir = terminal_dir($id);
+    if (!is_dir($dir)) {
+        throw new RuntimeException('Terminal session not found.');
+    }
+    return $dir;
+}
+
+function terminal_pid(string $id): int
+{
+    $dir = terminal_dir_from_id($id);
+    $pid = trim((string) @file_get_contents($dir . '/pid'));
+    return preg_match('/^\d+$/', $pid) ? (int) $pid : 0;
+}
+
+function terminal_alive(string $id): bool
+{
+    $pid = terminal_pid($id);
+    if ($pid <= 0) {
+        return false;
+    }
+    $result = run_command(['sh', '-lc', 'kill -0 ' . $pid . ' 2>/dev/null']);
+    return (int) $result['code'] === 0;
+}
+
+function json_response(array $payload): void
+{
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 }
 
 function dashboard_content(string $dockan): string
@@ -441,11 +670,22 @@ function container_content(string $dockan): string
         '<a class="button-link" href="?view=containers">Back</a>' .
         '</div>';
 
+    $liveTerminal = '<div class="live-terminal-panel" data-container="' . e($name) . '" data-csrf="' . e((string) ($_SESSION['csrf'] ?? '')) . '">' .
+        '<div class="actions terminal-toolbar">' .
+        '<button type="button" data-terminal-start>Connect</button>' .
+        '<button type="button" data-terminal-stop class="danger">Disconnect</button>' .
+        '<button type="button" data-terminal-clear>Clear</button>' .
+        '<span class="terminal-state" data-terminal-state>disconnected</span>' .
+        '</div>' .
+        '<pre class="live-terminal" data-terminal-output tabindex="0"></pre>' .
+        '<p class="help">Click inside the terminal, then type. Enter, Backspace, arrows, Tab, Ctrl+C, Ctrl+D and paste are sent to the running shell.</p>' .
+        '</div>';
+
     $command = trim((string) ($_POST['command'] ?? 'pwd && ls -la'));
-    $terminal = '<form method="post" class="terminal-form">' . csrf_field() .
+    $quickExec = '<form method="post" class="terminal-form">' . csrf_field() .
         '<input type="hidden" name="action" value="exec-container">' .
         '<input type="hidden" name="name" value="' . e($name) . '">' .
-        '<label>Command inside container<textarea name="command" class="small-editor" spellcheck="false" required>' . e($command) . '</textarea><span class="help">Runs through <code>dockan exec ' . e($name) . ' sh -lc "..."</code>. This is command execution, not a fully interactive PTY yet.</span></label>' .
+        '<label>Quick command<textarea name="command" class="small-editor" spellcheck="false" required>' . e($command) . '</textarea><span class="help">One-shot fallback through <code>dockan exec ' . e($name) . ' sh -lc "..."</code>.</span></label>' .
         '<button>Run Command</button>' .
         '</form>';
 
@@ -453,7 +693,8 @@ function container_content(string $dockan): string
     $logs = command_or_empty($dockan, ['logs', $name]);
 
     return section('Container', $summary) .
-        section('Terminal', $terminal) .
+        section('Live Terminal', $liveTerminal) .
+        section('Quick Exec', $quickExec) .
         section('Inspect', '<pre>' . e($inspect) . '</pre>') .
         section('Logs', '<pre>' . e($logs) . '</pre>');
 }
@@ -752,7 +993,7 @@ function render_page(string $title, string $content, bool $with_nav, ?string $fl
     if ($error) {
         $messages .= '<div class="alert danger">' . e($error) . '</div>';
     }
-    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" type="image/svg+xml" href="?asset=logo"><title>' . e($title) . ' - Dockan Panel</title><style>' . css() . '</style></head><body>' . $nav . '<main class="shell">' . $messages . $content . '</main></body></html>';
+    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" type="image/svg+xml" href="?asset=logo"><title>' . e($title) . ' - Dockan Panel</title><style>' . css() . '</style></head><body>' . $nav . '<main class="shell">' . $messages . $content . '</main><script>' . terminal_js() . '</script></body></html>';
 }
 
 function nav_html(): string
@@ -798,6 +1039,9 @@ function ensure_storage(): void
     }
     if (!is_dir(STACKS_DIR)) {
         mkdir(STACKS_DIR, 0755, true);
+    }
+    if (!is_dir(TERMINALS_DIR)) {
+        mkdir(TERMINALS_DIR, 0700, true);
     }
 }
 
@@ -924,6 +1168,137 @@ function human_bytes(int $bytes): string
         $value /= 1024;
     }
     return $bytes . ' B';
+}
+
+function terminal_js(): string
+{
+    return <<<'JS'
+(() => {
+  const ansi = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
+  const clean = (text) => text.replace(ansi, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const api = async (panel, terminalAction, extra = {}) => {
+    const body = new FormData();
+    body.set('csrf', panel.dataset.csrf || '');
+    body.set('terminal_action', terminalAction);
+    for (const [key, value] of Object.entries(extra)) {
+      body.set(key, value);
+    }
+    const response = await fetch('?terminal_api=1', { method: 'POST', body });
+    const data = await response.json();
+    if (!data.ok) throw new Error(data.error || 'Terminal error.');
+    return data;
+  };
+  document.querySelectorAll('[data-container][data-csrf]').forEach((panel) => {
+    const output = panel.querySelector('[data-terminal-output]');
+    const state = panel.querySelector('[data-terminal-state]');
+    const start = panel.querySelector('[data-terminal-start]');
+    const stop = panel.querySelector('[data-terminal-stop]');
+    const clear = panel.querySelector('[data-terminal-clear]');
+    let id = '';
+    let offset = 0;
+    let timer = 0;
+    let buffer = '';
+    const setState = (text) => { state.textContent = text; };
+    const append = (text) => {
+      if (!text) return;
+      buffer += clean(text);
+      if (buffer.length > 80000) buffer = buffer.slice(-80000);
+      output.textContent = buffer;
+      output.scrollTop = output.scrollHeight;
+    };
+    const poll = async () => {
+      if (!id) return;
+      try {
+        const data = await api(panel, 'read', { id, offset: String(offset) });
+        offset = data.offset || offset;
+        append(data.output || '');
+        setState(data.alive ? 'connected' : 'closed');
+        if (!data.alive) {
+          clearInterval(timer);
+          timer = 0;
+        }
+      } catch (error) {
+        append('\n[terminal] ' + error.message + '\n');
+        setState('error');
+        clearInterval(timer);
+        timer = 0;
+      }
+    };
+    const send = async (data) => {
+      if (!id) return;
+      try {
+        await api(panel, 'input', { id, data });
+        setTimeout(poll, 50);
+      } catch (error) {
+        append('\n[terminal] ' + error.message + '\n');
+      }
+    };
+    start.addEventListener('click', async () => {
+      if (id) return output.focus();
+      setState('connecting');
+      buffer = '';
+      output.textContent = '';
+      try {
+        const data = await api(panel, 'start', { name: panel.dataset.container });
+        id = data.id;
+        offset = data.offset || 0;
+        append(data.output || '');
+        setState(data.alive ? 'connected' : 'closed');
+        timer = window.setInterval(poll, 700);
+        output.focus();
+      } catch (error) {
+        append('[terminal] ' + error.message + '\n');
+        setState('error');
+      }
+    });
+    stop.addEventListener('click', async () => {
+      if (!id) return;
+      try {
+        const data = await api(panel, 'stop', { id });
+        append(data.output || '\n[terminal closed]\n');
+      } catch (error) {
+        append('\n[terminal] ' + error.message + '\n');
+      }
+      id = '';
+      offset = 0;
+      clearInterval(timer);
+      timer = 0;
+      setState('disconnected');
+    });
+    clear.addEventListener('click', () => {
+      buffer = '';
+      output.textContent = '';
+      output.focus();
+    });
+    output.addEventListener('paste', (event) => {
+      const text = event.clipboardData ? event.clipboardData.getData('text') : '';
+      if (text) {
+        event.preventDefault();
+        send(text);
+      }
+    });
+    output.addEventListener('keydown', (event) => {
+      if (!id) return;
+      let data = '';
+      if (event.ctrlKey && event.key.toLowerCase() === 'c') data = '\x03';
+      else if (event.ctrlKey && event.key.toLowerCase() === 'd') data = '\x04';
+      else if (event.ctrlKey && event.key.toLowerCase() === 'l') data = '\x0c';
+      else if (event.key === 'Enter') data = '\n';
+      else if (event.key === 'Backspace') data = '\x7f';
+      else if (event.key === 'Tab') data = '\t';
+      else if (event.key === 'ArrowUp') data = '\x1b[A';
+      else if (event.key === 'ArrowDown') data = '\x1b[B';
+      else if (event.key === 'ArrowRight') data = '\x1b[C';
+      else if (event.key === 'ArrowLeft') data = '\x1b[D';
+      else if (!event.ctrlKey && !event.metaKey && event.key.length === 1) data = event.key;
+      if (data !== '') {
+        event.preventDefault();
+        send(data);
+      }
+    });
+  });
+})();
+JS;
 }
 
 function e(string $value): string
@@ -1200,6 +1575,30 @@ th {
 .terminal-form {
   display: grid;
   gap: 12px;
+}
+.terminal-toolbar {
+  align-items: center;
+  margin-bottom: 10px;
+}
+.terminal-state {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.live-terminal {
+  min-height: 420px;
+  max-height: 62vh;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow: auto;
+  caret-color: #eaf6ef;
+}
+.live-terminal:focus {
+  outline: 3px solid #bfe8d3;
 }
 .check-row {
   align-self: end;

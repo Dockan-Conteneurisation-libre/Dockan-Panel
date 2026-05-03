@@ -19,7 +19,7 @@ It can:
 - run `dockan compose up`, `down`, `redeploy`, and `health` for a chosen `dockan.yml`
 - manage Portainer-style stacks from the UI by saving `dockan.yml` files, then deploying, stopping, redeploying, and checking health
 - import required stack images from a local Dockan registry folder before deployment
-- open a container detail page with actions, inspect output, logs, and a command exec terminal
+- open a container detail page with actions, inspect output, logs, a live PTY terminal, and a one-shot exec fallback
 
 ## Start
 
@@ -79,9 +79,10 @@ If `dockan` is installed in `~/.local/bin`, the panel adds that directory to
 
 This UI executes the local `dockan` CLI as the current Linux user.
 
-The container terminal runs commands with `dockan exec <container> sh -lc`.
-It is useful for diagnostics and simple changes, but it is not a fully
-interactive PTY terminal yet.
+The live terminal keeps a shell open through `dockan exec <container> sh -li`
+and a local PTY helper. It uses `socat` when available, otherwise the
+util-linux `script` command. The one-shot Quick Exec form is still available
+for simple commands.
 
 In the Containers page, click a container name to open its detail page. From
 there you can run commands inside it, read logs, inspect metadata, stop it,
