@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.8';
+const APP_VERSION = 'v0.1.9';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -195,6 +195,8 @@ function handle_action(string $action, string $dockan): string
         'store-app-launch' => store_app_launch($dockan),
         'store-app-update' => store_app_update($dockan, false),
         'store-app-redeploy' => store_app_update($dockan, true),
+        'store-app-save-config' => store_app_save_config($dockan, false),
+        'store-app-save-redeploy' => store_app_save_config($dockan, true),
         'add-user' => add_user_action(),
         'delete-user' => delete_user_action(),
         'set-password' => set_password_action(),
@@ -751,10 +753,16 @@ function store_app_install(string $dockan, bool $deploy): string
         '  cd ' . escapeshellarg($store),
         '  ./dockan-store install ' . escapeshellarg($app) . ' ' . escapeshellarg($target),
         'fi',
-        $deploy ? store_dockan_command($dockan, ['compose', 'up', '-f', $target . '/dockan.yml']) : 'true',
         shell_command(['printf', "Store app ready: %s -> %s\n", $app, $target]),
     ]);
-    return command_text(run_command(['sh', '-lc', $script]));
+    $output = [command_text(run_command(['sh', '-lc', $script]))];
+    if (array_key_exists('config_yaml', $_POST) && trim((string) $_POST['config_yaml']) !== '') {
+        $output[] = persist_store_app_config($app, $target, (string) $_POST['config_yaml']);
+    }
+    if ($deploy) {
+        $output[] = command_text(run_command(['sh', '-lc', store_dockan_command($dockan, ['compose', 'up', '-f', $target . '/dockan.yml'])]));
+    }
+    return trim(implode("\n", array_filter($output)));
 }
 
 function store_app_launch(string $dockan): string
@@ -785,13 +793,87 @@ function store_app_update(string $dockan, bool $redeploy): string
         'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
         'test -x ' . escapeshellarg($store . '/dockan-store'),
         'test -d ' . escapeshellarg($store . '/apps/' . $app),
+        'saved_config=' . escapeshellarg($target . '/.dockan.yml.panel-save'),
+        'had_config=0',
+        'if [ -f ' . escapeshellarg($target . '/dockan.yml') . ' ]; then',
+        '  cp ' . escapeshellarg($target . '/dockan.yml') . ' "$saved_config"',
+        '  had_config=1',
+        'fi',
         'cd ' . escapeshellarg($store),
         './dockan-store images ' . escapeshellarg($app),
         'cp -a ' . escapeshellarg($store . '/apps/' . $app . '/.') . ' ' . escapeshellarg($target . '/'),
+        'if [ "$had_config" = "1" ]; then',
+        '  mv "$saved_config" ' . escapeshellarg($target . '/dockan.yml'),
+        'fi',
         $redeploy ? store_dockan_command($dockan, ['compose', 'redeploy', '-f', $target . '/dockan.yml']) : 'true',
         shell_command(['printf', "Store app updated: %s -> %s\n", $app, $target]),
     ]);
     return command_text(run_command(['sh', '-lc', $script]));
+}
+
+function store_app_save_config(string $dockan, bool $redeploy): string
+{
+    $app = clean_store_app(required_post('app'));
+    $target = clean_store_target(required_post('target'));
+    $output = [persist_store_app_config($app, $target, (string) ($_POST['config_yaml'] ?? ''))];
+    if ($redeploy) {
+        $output[] = command_text(run_command(['sh', '-lc', store_dockan_command($dockan, ['compose', 'redeploy', '-f', $target . '/dockan.yml'])]));
+    }
+    return trim(implode("\n", array_filter($output)));
+}
+
+function persist_store_app_config(string $app, string $target, string $yaml): string
+{
+    $yaml = rtrim(str_replace(["\r\n", "\r"], "\n", $yaml));
+    if ($yaml === '') {
+        throw new RuntimeException('dockan.yml is empty.');
+    }
+    if (strlen($yaml) > 512 * 1024) {
+        throw new RuntimeException('dockan.yml is too large.');
+    }
+    $yaml = normalize_store_config_yaml($yaml);
+    if (!is_dir($target)) {
+        throw new RuntimeException('App folder does not exist yet. Use Install first.');
+    }
+    $file = $target . '/dockan.yml';
+    if (is_link($file)) {
+        throw new RuntimeException('Refusing to overwrite symlinked dockan.yml.');
+    }
+    if (is_file($file)) {
+        $backup = $target . '/dockan.yml.bak-' . date('Ymd-His');
+        if (!copy($file, $backup)) {
+            throw new RuntimeException('Unable to create dockan.yml backup.');
+        }
+    }
+    if (file_put_contents($file, $yaml . "\n", LOCK_EX) === false) {
+        throw new RuntimeException('Unable to save dockan.yml.');
+    }
+    return 'Store app config saved: ' . $app . ' -> ' . $file;
+}
+
+function normalize_store_config_yaml(string $yaml): string
+{
+    return rtrim(str_replace(["\r\n", "\r"], "\n", $yaml));
+}
+
+function store_app_config_shell_lines(string $app, string $target, string $yaml): array
+{
+    $yaml = normalize_store_config_yaml($yaml);
+    if ($yaml === '') {
+        return [];
+    }
+    if (strlen($yaml) > 512 * 1024) {
+        throw new RuntimeException('dockan.yml is too large.');
+    }
+    $file = $target . '/dockan.yml';
+    $backup = $target . '/dockan.yml.bak-' . date('Ymd-His');
+    return [
+        'config_file=' . escapeshellarg($file),
+        'if [ -L "$config_file" ]; then echo "Refusing to overwrite symlinked dockan.yml." >&2; exit 1; fi',
+        'if [ -f "$config_file" ]; then cp "$config_file" ' . escapeshellarg($backup) . '; fi',
+        'printf %s ' . escapeshellarg(base64_encode($yaml . "\n")) . ' | base64 -d > "$config_file"',
+        shell_command(['printf', "Store app config saved: %s -> %s\n", $app, $file]),
+    ];
 }
 
 function store_app_autostart(string $dockan, bool $install): string
@@ -813,6 +895,9 @@ function store_app_autostart(string $dockan, bool $install): string
         $lines[] = '  cd ' . escapeshellarg($store);
         $lines[] = '  ./dockan-store install ' . escapeshellarg($app) . ' ' . escapeshellarg($target);
         $lines[] = 'fi';
+    }
+    if (array_key_exists('config_yaml', $_POST)) {
+        array_push($lines, ...store_app_config_shell_lines($app, $target, (string) $_POST['config_yaml']));
     }
     $lines[] = 'test -f ' . escapeshellarg($target . '/dockan.yml');
     $lines[] = 'if ! ' . store_dockan_command($dockan, ['compose', 'autostart', '-f', $target . '/dockan.yml', '--name', $app]) . '; then';
@@ -2071,6 +2156,7 @@ function store_app_card(array $app, bool $storeInstalled): string
     $autostart = store_app_service_enabled($id);
     $initials = store_initials($name);
     $logo = store_app_logo($app);
+    $configYaml = store_app_config_yaml($id, $target, $installed);
     $imageTags = '';
     foreach ($requires as $image) {
         $imageTags .= '<code>' . e($image) . '</code>';
@@ -2082,6 +2168,8 @@ function store_app_card(array $app, bool $storeInstalled): string
     $actions = '';
     if ($installed) {
         $actions .= '<button name="action" value="store-app-launch">Launch</button>';
+        $actions .= '<button name="action" value="store-app-save-config">Save Config</button>';
+        $actions .= '<button name="action" value="store-app-save-redeploy">Save + Redeploy</button>';
         $actions .= '<button name="action" value="store-app-update"' . ($storeInstalled ? '' : ' disabled') . '>Update Files</button>';
         $actions .= '<button name="action" value="store-app-redeploy"' . ($storeInstalled ? '' : ' disabled') . '>Update + Redeploy</button>';
         if ($autostart) {
@@ -2095,9 +2183,18 @@ function store_app_card(array $app, bool $storeInstalled): string
         $actions .= '<button name="action" value="store-app-install-autostart"' . ($storeInstalled ? '' : ' disabled') . '>Install + Auto-start</button>';
     }
 
+    $configEditor = '';
+    if ($configYaml !== '') {
+        $configEditor = '<details class="store-config"><summary>dockan.yml</summary>' .
+            '<label>Config<textarea name="config_yaml" class="store-config-editor" spellcheck="false">' . e($configYaml) . '</textarea></label>' .
+            ($installed ? '<span class="help">Saving creates a timestamped backup next to the app config.</span>' : '<span class="help">This template can be edited before install.</span>') .
+            '</details>';
+    }
+
     $form = '<form method="post" class="store-card-form">' . csrf_field() .
         '<input type="hidden" name="app" value="' . e($id) . '">' .
         '<label>Install folder<input name="target" value="' . e($target) . '" required></label>' .
+        $configEditor .
         '<div class="actions store-actions">' . $actions . '</div></form>';
 
     return '<article class="store-card">' .
@@ -2106,6 +2203,15 @@ function store_app_card(array $app, bool $storeInstalled): string
         '<div class="store-images">' . $imageTags . '</div>' .
         $form .
         '</article>';
+}
+
+function store_app_config_yaml(string $app, string $target, bool $installed): string
+{
+    $file = $installed ? $target . '/dockan.yml' : STORE_APPS_DIR . '/' . $app . '/dockan.yml';
+    if (!is_file($file) || filesize($file) > 512 * 1024) {
+        return '';
+    }
+    return (string) file_get_contents($file);
 }
 
 function store_app_service_enabled(string $app): bool
@@ -3467,6 +3573,23 @@ th {
 }
 .store-actions button {
   flex: 1 1 142px;
+}
+.store-config {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fbfcfa;
+}
+.store-config summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--accent-dark);
+}
+.store-config label {
+  margin-top: 10px;
+}
+.store-config-editor {
+  min-height: 260px;
 }
 .detail-actions {
   margin-top: 14px;
