@@ -733,7 +733,7 @@ function store_app_install(string $dockan, bool $deploy): string
         '  cd ' . escapeshellarg($store),
         '  ./dockan-store install ' . escapeshellarg($app) . ' ' . escapeshellarg($target),
         'fi',
-        $deploy ? shell_command([$dockan, 'compose', 'up', '-f', $target . '/dockan.yml']) : 'true',
+        $deploy ? store_dockan_command($dockan, ['compose', 'up', '-f', $target . '/dockan.yml']) : 'true',
         shell_command(['printf', "Store app ready: %s -> %s\n", $app, $target]),
     ]);
     return command_text(run_command(['sh', '-lc', $script]));
@@ -747,7 +747,7 @@ function store_app_launch(string $dockan): string
         'set -eu',
         'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
         'test -f ' . escapeshellarg($target . '/dockan.yml'),
-        shell_command([$dockan, 'compose', 'up', '-f', $target . '/dockan.yml']),
+        store_dockan_command($dockan, ['compose', 'up', '-f', $target . '/dockan.yml']),
         shell_command(['printf', "Store app launched: %s -> %s\n", $app, $target]),
     ];
     return system_command_text(system_shell_run(implode("\n", $lines)));
@@ -770,7 +770,7 @@ function store_app_update(string $dockan, bool $redeploy): string
         'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
         './dockan-store images ' . escapeshellarg($app),
         'cp -a ' . escapeshellarg($store . '/apps/' . $app . '/.') . ' ' . escapeshellarg($target . '/'),
-        $redeploy ? shell_command([$dockan, 'compose', 'redeploy', '-f', $target . '/dockan.yml']) : 'true',
+        $redeploy ? store_dockan_command($dockan, ['compose', 'redeploy', '-f', $target . '/dockan.yml']) : 'true',
         shell_command(['printf', "Store app updated: %s -> %s\n", $app, $target]),
     ]);
     return command_text(run_command(['sh', '-lc', $script]));
@@ -797,7 +797,7 @@ function store_app_autostart(string $dockan, bool $install): string
         $lines[] = 'fi';
     }
     $lines[] = 'test -f ' . escapeshellarg($target . '/dockan.yml');
-    $lines[] = 'if ! ' . shell_command([$dockan, 'compose', 'autostart', '-f', $target . '/dockan.yml', '--name', $app]) . '; then';
+    $lines[] = 'if ! ' . store_dockan_command($dockan, ['compose', 'autostart', '-f', $target . '/dockan.yml', '--name', $app]) . '; then';
     $lines[] = '  echo "Native compose autostart unavailable, falling back to service install."';
     $lines[] = '  ' . shell_command([$dockan, 'service', 'install', '-f', $target . '/dockan.yml', '--name', $app]);
     $lines[] = '  systemctl daemon-reload';
@@ -825,6 +825,11 @@ function store_app_disable_autostart(string $dockan): string
         shell_command(['printf', "Store app autostart disabled: %s -> %s\n", $app, $target]),
     ];
     return system_command_text(system_shell_run(implode("\n", $lines)));
+}
+
+function store_dockan_command(string $dockan, array $args): string
+{
+    return shell_command(array_merge(['env', 'DOCKAN_PORT_BIND_ADDR=0.0.0.0', $dockan], $args));
 }
 
 function clean_store_app(string $app): string
