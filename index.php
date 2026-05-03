@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.0';
+const APP_VERSION = 'v0.1.1';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -179,6 +179,8 @@ function handle_action(string $action, string $dockan): string
         'store-update-run' => store_update_run(),
         'store-app-install' => store_app_install($dockan, false),
         'store-app-deploy' => store_app_install($dockan, true),
+        'store-app-update' => store_app_update($dockan, false),
+        'store-app-redeploy' => store_app_update($dockan, true),
         'add-user' => add_user_action(),
         'delete-user' => delete_user_action(),
         'set-password' => set_password_action(),
@@ -709,6 +711,29 @@ function store_app_install(string $dockan, bool $deploy): string
         './dockan-store install ' . escapeshellarg($app) . ' ' . escapeshellarg($target),
         $deploy ? shell_command([$dockan, 'compose', 'up', '-f', $target . '/dockan.yml']) : 'true',
         shell_command(['printf', "Store app ready: %s -> %s\n", $app, $target]),
+    ]);
+    return command_text(run_command(['sh', '-lc', $script]));
+}
+
+function store_app_update(string $dockan, bool $redeploy): string
+{
+    $app = clean_store_app(required_post('app'));
+    $target = clean_store_target(required_post('target'));
+    $store = STORE_DIR;
+    if (!is_file($store . '/dockan-store')) {
+        throw new RuntimeException('Dockan Store is not installed yet. Click Install / Update Store first.');
+    }
+    if (!is_dir($target)) {
+        throw new RuntimeException('App folder does not exist yet. Use Install first.');
+    }
+    $script = implode("\n", [
+        'set -eu',
+        'cd ' . escapeshellarg($store),
+        'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
+        './dockan-store images ' . escapeshellarg($app),
+        'cp -a ' . escapeshellarg($store . '/apps/' . $app . '/.') . ' ' . escapeshellarg($target . '/'),
+        $redeploy ? shell_command([$dockan, 'compose', 'redeploy', '-f', $target . '/dockan.yml']) : 'true',
+        shell_command(['printf', "Store app updated: %s -> %s\n", $app, $target]),
     ]);
     return command_text(run_command(['sh', '-lc', $script]));
 }
@@ -1889,6 +1914,7 @@ function store_app_card(array $app, bool $storeInstalled): string
     $port = (string) ($app['default_port'] ?? '');
     $requires = is_array($app['requires'] ?? null) ? array_values(array_filter(array_map('strval', $app['requires']))) : [];
     $target = store_default_target($id);
+    $installed = is_dir($target);
     $initials = store_initials($name);
     $imageTags = '';
     foreach ($requires as $image) {
@@ -1904,10 +1930,12 @@ function store_app_card(array $app, bool $storeInstalled): string
         '<div class="actions">' .
         '<button name="action" value="store-app-install"' . ($storeInstalled ? '' : ' disabled') . '>Install</button>' .
         '<button name="action" value="store-app-deploy"' . ($storeInstalled ? '' : ' disabled') . '>Install + Launch</button>' .
+        '<button name="action" value="store-app-update"' . ($storeInstalled && $installed ? '' : ' disabled') . '>Update</button>' .
+        '<button name="action" value="store-app-redeploy"' . ($storeInstalled && $installed ? '' : ' disabled') . '>Update + Redeploy</button>' .
         '</div></form>';
 
     return '<article class="store-card">' .
-        '<div class="store-card-head"><div class="store-logo">' . e($initials) . '</div><div><h3>' . e($name) . '</h3><div class="badge-row"><span class="badge ok">' . e($category) . '</span>' . ($port !== '' ? '<span class="badge">:' . e($port) . '</span>' : '') . '</div></div></div>' .
+        '<div class="store-card-head"><div class="store-logo">' . e($initials) . '</div><div><h3>' . e($name) . '</h3><div class="badge-row"><span class="badge ok">' . e($category) . '</span>' . ($port !== '' ? '<span class="badge">:' . e($port) . '</span>' : '') . ($installed ? '<span class="badge warn">installed</span>' : '') . '</div></div></div>' .
         '<p>' . e($summary) . '</p>' .
         '<div class="store-images">' . $imageTags . '</div>' .
         $form .

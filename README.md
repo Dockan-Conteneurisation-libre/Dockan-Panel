@@ -18,7 +18,7 @@
 This project is separate from the Dockan CLI repository. It is meant to live in
 its own repository and call the local `dockan` command installed on the machine.
 
-Current panel version: `v0.1.0`.
+Current panel version: `v0.1.1`.
 
 It can:
 
@@ -117,7 +117,9 @@ The panel keeps the Store under `storage/store/Dockan-Store`, then app cards can
 install only the images and template needed by the selected app. In production,
 the default target is `/srv/dockan-apps/APP_ID`; non-root panels default to
 `$HOME/dockan-apps/APP_ID`. `Install + Launch` runs the app with
-`dockan compose up` after the template is installed.
+`dockan compose up` after the template is installed. Existing Store apps show
+`Update` and `Update + Redeploy` actions to refresh the bundled images and copy
+the latest template before optionally running `dockan compose redeploy`.
 
 This compose file uses `isolation: none` because the panel is an admin UI: it
 must call the host `dockan` CLI and manage the host Dockan containers.
