@@ -2189,13 +2189,17 @@ function nav_html(): string
         'packages' => 'Packages',
         'security' => 'Security',
     ];
-    $html = '<header><div class="topbar"><a class="brand" href="?view=dashboard"><img src="?asset=logo" alt=""><span>Dockan Panel</span></a><nav>';
+    $links = '';
     foreach ($items as $key => $label) {
         $active = ($_GET['view'] ?? 'dashboard') === $key ? ' class="active"' : '';
-        $html .= '<a' . $active . ' href="?view=' . e($key) . '">' . e($label) . '</a>';
+        $links .= '<a' . $active . ' href="?view=' . e($key) . '">' . e($label) . '</a>';
     }
-    $html .= '</nav><form method="post">' . csrf_field() . '<button name="logout" value="1">Logout</button></form></div></header>';
-    return $html;
+    return '<header><div class="topbar">' .
+        '<a class="brand" href="?view=dashboard"><img src="?asset=logo" alt=""><span>Dockan Panel</span></a>' .
+        '<nav class="desktop-nav">' . $links . '</nav>' .
+        '<details class="mobile-nav"><summary aria-label="Navigation"><span class="menu-bars" aria-hidden="true"><span></span><span></span><span></span></span></summary><nav>' . $links . '</nav></details>' .
+        '<form class="logout-form" method="post">' . csrf_field() . '<button name="logout" value="1">Logout</button></form>' .
+        '</div></header>';
 }
 
 function page_title(string $view): string
@@ -2758,7 +2762,7 @@ header {
   width: 36px;
   height: 36px;
 }
-nav {
+.desktop-nav {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -2770,10 +2774,10 @@ nav {
   scrollbar-width: none;
   font-size: 0.88rem;
 }
-nav::-webkit-scrollbar {
+.desktop-nav::-webkit-scrollbar {
   display: none;
 }
-nav a {
+.desktop-nav a, .mobile-nav a {
   color: var(--muted);
   text-decoration: none;
   padding: 7px 8px;
@@ -2782,9 +2786,62 @@ nav a {
   line-height: 1.2;
   flex: 0 0 auto;
 }
-nav a.active, nav a:hover {
+.desktop-nav a.active, .desktop-nav a:hover,
+.mobile-nav a.active, .mobile-nav a:hover {
   background: #eef6f1;
   color: var(--accent-dark);
+}
+.mobile-nav {
+  display: none;
+  position: relative;
+  flex: 0 0 auto;
+}
+.mobile-nav summary {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  list-style: none;
+}
+.mobile-nav summary::-webkit-details-marker {
+  display: none;
+}
+.menu-bars {
+  width: 18px;
+  display: grid;
+  gap: 4px;
+}
+.menu-bars span {
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent-dark);
+}
+.mobile-nav nav {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(280px, calc(100vw - 24px));
+  max-height: calc(100vh - 82px);
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.mobile-nav a {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
 }
 header form {
   flex: 0 0 auto;
@@ -3114,11 +3171,11 @@ code {
 }
 @media (max-width: 760px) {
   .topbar { width: min(100vw - 18px, 1180px); gap: 8px; min-height: 58px; }
-  .brand span { display: none; }
+  .brand { min-width: 0; }
+  .brand span { display: inline; max-width: 42vw; overflow: hidden; text-overflow: ellipsis; }
   .brand img { width: 34px; height: 34px; }
-  nav { font-size: 0.82rem; scroll-snap-type: x proximity; }
-  nav a { scroll-snap-align: start; }
-  nav a { padding: 6px 7px; }
+  .desktop-nav { display: none; }
+  .mobile-nav { display: block; }
   header form button { padding: 0 9px; font-size: 0.82rem; }
   .stats, .compose-form, .inline-form, .package-form, .run-basic, .advanced-grid, .security-grid { grid-template-columns: 1fr; }
   .shell { width: min(100vw - 24px, 1120px); margin-top: 12px; }
@@ -3127,6 +3184,12 @@ code {
   .live-terminal { min-height: 340px; max-height: 58vh; }
   .auth { margin: 7vh auto; }
   .actions button, .actions .button-link { flex: 1 1 auto; }
+}
+@media (max-width: 380px) {
+  .brand span { display: none; }
+  .topbar { width: min(100vw - 12px, 1180px); gap: 6px; }
+  .mobile-nav summary { width: 36px; height: 36px; }
+  header form button { min-height: 36px; padding: 0 8px; }
 }
 CSS;
 }
