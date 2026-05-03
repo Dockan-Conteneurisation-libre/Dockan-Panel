@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.11';
+const APP_VERSION = 'v0.1.12';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -2763,6 +2763,9 @@ function parse_table(string $text): array
     if ($headers === ['NAME', 'STATUS', 'PID', 'IMAGE', 'PORTS']) {
         return parse_container_table($lines);
     }
+    if ($headers === ['STORE', 'NAME', 'STATUS', 'PID', 'IMAGE', 'PORTS']) {
+        return parse_scoped_container_table($lines);
+    }
     $rows = [];
     for ($i = 1; $i < count($lines); $i++) {
         $parts = preg_split('/\s{2,}/', trim($lines[$i]), count($headers)) ?: [];
@@ -2795,6 +2798,29 @@ function parse_container_table(array $lines): array
             'PID' => $matches[3],
             'IMAGE' => $matches[4],
             'PORTS' => $matches[5] ?? '',
+        ];
+    }
+    return $rows;
+}
+
+function parse_scoped_container_table(array $lines): array
+{
+    $rows = [];
+    for ($i = 1; $i < count($lines); $i++) {
+        $line = trim($lines[$i]);
+        if ($line === '') {
+            continue;
+        }
+        if (!preg_match('/^(\S+)\s+(.+?)\s+(running|exited|stopped|created|restarting|paused)\s+(\d+)\s+(\S+)(?:\s+(.*))?$/', $line, $matches)) {
+            continue;
+        }
+        $rows[] = [
+            'STORE' => $matches[1],
+            'NAME' => $matches[2],
+            'STATUS' => $matches[3],
+            'PID' => $matches[4],
+            'IMAGE' => $matches[5],
+            'PORTS' => $matches[6] ?? '',
         ];
     }
     return $rows;
