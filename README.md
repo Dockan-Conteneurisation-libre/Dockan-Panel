@@ -360,6 +360,29 @@ The same command can be previewed from the panel with `Show Command`. One-click
 updates require the panel to run as the root/system service; otherwise run the
 shown command manually with `sudo`.
 
+## Release Workflow
+
+Dockan Panel publishes GitHub releases automatically when a version tag is
+pushed. The release contains a `dockan-panel-VERSION.tar.gz` archive, a
+`SHA256SUMS` file, and generated notes listing the commits since the previous
+tag.
+
+Before tagging a new release, bump the version displayed by the panel:
+
+```bash
+./scripts/bump-version.sh v0.1.1
+git add index.php README.md
+git commit -m "Release Dockan Panel v0.1.1"
+git tag -a v0.1.1 -m "Dockan Panel v0.1.1"
+git push
+git push origin v0.1.1
+```
+
+The pushed tag triggers `.github/workflows/release.yml`. The workflow verifies
+that `APP_VERSION` and this README match the tag before it creates the GitHub
+release. Production panels can then update from `Packages` by using the same
+tag in `Panel GitHub Update`.
+
 ## Notes
 
 This UI executes the local `dockan` CLI as the current Linux user.

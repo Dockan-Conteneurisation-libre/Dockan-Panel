@@ -1,0 +1,75 @@
+name: Panel Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout tag
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git init repo
+          cd repo
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --tags --force origin
+          git checkout --detach "${GITHUB_REF_NAME}"
+
+      - name: Verify panel version
+        working-directory: repo
+        run: |
+          set -eu
+          grep -F "const APP_VERSION = '${GITHUB_REF_NAME}';" index.php
+          grep -F "Current panel version: \`${GITHUB_REF_NAME}\`." README.md
+
+      - name: Build release archive
+        working-directory: repo
+        run: |
+          set -eu
+          name="dockan-panel-${GITHUB_REF_NAME}"
+          mkdir -p "dist/${name}"
+          cp -a index.php README.md dockan-logo.svg Caddyfile Dockanfile dockan.yml restore-prod-storage.sh "dist/${name}/"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+          (cd dist && sha256sum "${name}.tar.gz" > SHA256SUMS)
+
+      - name: Generate release notes
+        working-directory: repo
+        run: |
+          set -eu
+          previous="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          {
+            echo "## Dockan Panel ${GITHUB_REF_NAME}"
+            echo
+            echo "### Changes"
+            if [ -n "$previous" ]; then
+              git log --pretty=format:'- %s (%h)' "${previous}..${GITHUB_REF_NAME}"
+            else
+              git log --pretty=format:'- %s (%h)' "${GITHUB_REF_NAME}"
+            fi
+            echo
+            echo
+            echo "### Production update"
+            echo "- In Dockan Panel, open Packages -> Panel GitHub Update and use ref \`${GITHUB_REF_NAME}\`."
+            echo "- The release archive updates application files only; keep \`storage/\` and \`dockan-panel-data\` as persistent data."
+          } > RELEASE_NOTES.md
+
+      - name: Publish GitHub release
+        working-directory: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Dockan Panel ${GITHUB_REF_NAME}" \
+            --notes-file RELEASE_NOTES.md \
+            "dist/dockan-panel-${GITHUB_REF_NAME}.tar.gz" \
+            "dist/SHA256SUMS"
