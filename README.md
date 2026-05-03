@@ -1,6 +1,19 @@
-# Dockan Panel
+<p align="center">
+  <img src="./dockan-logo.svg" alt="Dockan Panel logo" width="96">
+</p>
 
-A small standalone PHP web interface for Dockan.
+<h1 align="center">Dockan Panel</h1>
+
+<p align="center">
+  A small standalone PHP web interface for Dockan.
+</p>
+
+<p align="center">
+  <img alt="PHP 8.3+" src="https://img.shields.io/badge/PHP-8.3%2B-777BB4?logo=php&logoColor=white">
+  <img alt="Dockan app" src="https://img.shields.io/badge/runs%20with-Dockan-176b48">
+  <img alt="PWA ready" src="https://img.shields.io/badge/PWA-ready-0e4932">
+  <img alt="Local first" src="https://img.shields.io/badge/local--first-admin%20panel-17201b">
+</p>
 
 This project is separate from the Dockan CLI repository. It is meant to live in
 its own repository and call the local `dockan` command installed on the machine.
