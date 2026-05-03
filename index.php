@@ -2210,13 +2210,14 @@ header {
   z-index: 3;
 }
 .topbar {
-  min-height: 68px;
   width: min(1180px, calc(100vw - 48px));
   margin: 0 auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
+  gap: 10px 18px;
+  padding: 12px 0;
 }
 .brand {
   display: inline-flex;
@@ -2227,6 +2228,7 @@ header {
   text-decoration: none;
   white-space: nowrap;
   font-size: 1.08rem;
+  flex: 0 0 auto;
 }
 .brand img {
   width: 40px;
@@ -2234,10 +2236,11 @@ header {
 }
 nav {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  overflow-x: auto;
-  flex: 1;
+  gap: 6px;
+  flex: 1 1 540px;
+  min-width: 0;
   font-size: 0.95rem;
 }
 nav a {
@@ -2246,10 +2249,15 @@ nav a {
   padding: 8px 11px;
   border-radius: 8px;
   font-weight: 700;
+  line-height: 1.2;
 }
 nav a.active, nav a:hover {
   background: #eef6f1;
   color: var(--accent-dark);
+}
+header form {
+  flex: 0 0 auto;
+  margin: 0;
 }
 .shell {
   width: min(1120px, calc(100vw - 48px));
