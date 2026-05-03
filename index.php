@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.2';
+const APP_VERSION = 'v0.1.3';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -180,6 +180,8 @@ function handle_action(string $action, string $dockan): string
         'store-update-run' => store_update_run(),
         'store-app-install' => store_app_install($dockan, false),
         'store-app-deploy' => store_app_install($dockan, true),
+        'store-app-install-autostart' => store_app_autostart($dockan, true),
+        'store-app-autostart' => store_app_autostart($dockan, false),
         'store-app-update' => store_app_update($dockan, false),
         'store-app-redeploy' => store_app_update($dockan, true),
         'add-user' => add_user_action(),
@@ -752,6 +754,31 @@ function store_app_update(string $dockan, bool $redeploy): string
         shell_command(['printf', "Store app updated: %s -> %s\n", $app, $target]),
     ]);
     return command_text(run_command(['sh', '-lc', $script]));
+}
+
+function store_app_autostart(string $dockan, bool $install): string
+{
+    $app = clean_store_app(required_post('app'));
+    $target = clean_store_target(required_post('target'));
+    $store = STORE_DIR;
+    if ($install && !is_file($store . '/dockan-store')) {
+        throw new RuntimeException('Dockan Store is not installed yet. Click Install / Update Store first.');
+    }
+    $service = 'dockan-' . $app . '.service';
+    $lines = [
+        'set -eu',
+        'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
+    ];
+    if ($install) {
+        $lines[] = 'cd ' . escapeshellarg($store);
+        $lines[] = './dockan-store install ' . escapeshellarg($app) . ' ' . escapeshellarg($target);
+    }
+    $lines[] = 'test -f ' . escapeshellarg($target . '/dockan.yml');
+    $lines[] = shell_command([$dockan, 'service', 'install', '-f', $target . '/dockan.yml', '--name', $app]);
+    $lines[] = 'systemctl daemon-reload';
+    $lines[] = shell_command(['systemctl', 'enable', '--now', $service]);
+    $lines[] = shell_command(['printf', "Store app autostart enabled: %s -> %s (%s)\n", $app, $target, $service]);
+    return system_command_text(system_shell_run(implode("\n", $lines)));
 }
 
 function clean_store_app(string $app): string
@@ -1931,6 +1958,7 @@ function store_app_card(array $app, bool $storeInstalled): string
     $requires = is_array($app['requires'] ?? null) ? array_values(array_filter(array_map('strval', $app['requires']))) : [];
     $target = store_default_target($id);
     $installed = is_dir($target);
+    $autostart = store_app_service_enabled($id);
     $initials = store_initials($name);
     $logo = store_app_logo($app);
     $imageTags = '';
@@ -1947,16 +1975,23 @@ function store_app_card(array $app, bool $storeInstalled): string
         '<div class="actions">' .
         '<button name="action" value="store-app-install"' . ($storeInstalled ? '' : ' disabled') . '>Install</button>' .
         '<button name="action" value="store-app-deploy"' . ($storeInstalled ? '' : ' disabled') . '>Install + Launch</button>' .
+        '<button name="action" value="store-app-install-autostart"' . ($storeInstalled ? '' : ' disabled') . '>Install + Auto-start</button>' .
         '<button name="action" value="store-app-update"' . ($storeInstalled && $installed ? '' : ' disabled') . '>Update</button>' .
         '<button name="action" value="store-app-redeploy"' . ($storeInstalled && $installed ? '' : ' disabled') . '>Update + Redeploy</button>' .
+        '<button name="action" value="store-app-autostart"' . ($installed ? '' : ' disabled') . '>Enable Auto-start</button>' .
         '</div></form>';
 
     return '<article class="store-card">' .
-        '<div class="store-card-head"><div class="store-logo">' . ($logo !== '' ? '<img src="' . e($logo) . '" alt="" loading="lazy">' : e($initials)) . '</div><div><h3>' . e($name) . '</h3><div class="badge-row"><span class="badge ok">' . e($category) . '</span>' . ($port !== '' ? '<span class="badge">:' . e($port) . '</span>' : '') . ($installed ? '<span class="badge warn">installed</span>' : '') . '</div></div></div>' .
+        '<div class="store-card-head"><div class="store-logo">' . ($logo !== '' ? '<img src="' . e($logo) . '" alt="" loading="lazy">' : e($initials)) . '</div><div><h3>' . e($name) . '</h3><div class="badge-row"><span class="badge ok">' . e($category) . '</span>' . ($port !== '' ? '<span class="badge">:' . e($port) . '</span>' : '') . ($installed ? '<span class="badge warn">installed</span>' : '') . ($autostart ? '<span class="badge ok">auto-start</span>' : '') . '</div></div></div>' .
         '<p>' . e($summary) . '</p>' .
         '<div class="store-images">' . $imageTags . '</div>' .
         $form .
         '</article>';
+}
+
+function store_app_service_enabled(string $app): bool
+{
+    return is_file('/etc/systemd/system/dockan-' . $app . '.service');
 }
 
 function store_app_logo(array $app): string
