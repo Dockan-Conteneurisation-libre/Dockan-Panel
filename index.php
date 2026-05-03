@@ -873,15 +873,17 @@ function run_form(array $images): string
     if ($options === '') {
         $options = '<option value="">No local image</option>';
     }
-    return '<form method="post" class="run-form">' . csrf_field() .
-        '<input type="hidden" name="action" value="run-image">' .
+    $basic = '<div class="run-basic">' .
         '<label>Name<input name="name" placeholder="myapp" required></label>' .
         '<label>Image<select name="image" required>' . $options . '</select></label>' .
-        '<label>Ports<textarea name="ports" class="mini-editor" spellcheck="false" placeholder="8080:8080&#10;8443:8443"></textarea><span class="help">One mapping per line, host:container.</span></label>' .
-        '<label>Volumes<textarea name="volumes" class="mini-editor" spellcheck="false" placeholder="app-data:/app/data&#10;/home/anar/site:/app/site:ro"></textarea><span class="help">One mount per line, source:container-path[:ro].</span></label>' .
+        '<label>Ports<input name="ports" placeholder="8080:8080"></label>' .
+        '<button>Create</button>' .
+        '</div>';
+    $advanced = '<details class="advanced-options"><summary>Advanced options</summary><div class="advanced-grid">' .
+        '<label>Volumes<textarea name="volumes" class="mini-editor" spellcheck="false" placeholder="app-data:/app/data&#10;/home/anar/site:/app/site:ro"></textarea><span class="help">One mount per line.</span></label>' .
         '<label>Environment<textarea name="env" class="mini-editor" spellcheck="false" placeholder="PORT=8080&#10;APP_ENV=prod"></textarea><span class="help">One KEY=VALUE per line.</span></label>' .
         '<label>Network<input name="network" placeholder="host or my-network"></label>' .
-        '<label>Aliases<textarea name="aliases" class="mini-editor" spellcheck="false" placeholder="web&#10;api"></textarea><span class="help">Optional names on a Dockan network.</span></label>' .
+        '<label>Aliases<textarea name="aliases" class="mini-editor" spellcheck="false" placeholder="web&#10;api"></textarea></label>' .
         '<label>Entrypoint<input name="entrypoint" placeholder="/bin/sh"></label>' .
         '<label>Command<input name="command" placeholder="-lc &quot;php -S 0.0.0.0:8080&quot;"></label>' .
         '<label>Restart<select name="restart"><option value="">Image default</option><option value="no">no</option><option value="always">always</option><option value="on-failure">on-failure</option></select></label>' .
@@ -890,7 +892,10 @@ function run_form(array $images): string
         '<label>CPUs<input name="cpus" placeholder="1.5"></label>' .
         '<label>Isolation<select name="isolation"><option value="">auto</option><option value="none">none</option><option value="firejail">firejail</option><option value="bubblewrap">bubblewrap</option><option value="systemd-nspawn">systemd-nspawn</option><option value="chroot">chroot</option></select></label>' .
         '<label class="check-row"><input type="checkbox" name="gui" value="1"> GUI sockets</label>' .
-        '<button>Create Container</button>' .
+        '</div></details>';
+    return '<form method="post" class="run-form">' . csrf_field() .
+        '<input type="hidden" name="action" value="run-image">' .
+        $basic . $advanced .
         '</form>';
 }
 
@@ -1577,7 +1582,7 @@ th {
   white-space: pre-wrap;
   border: 1px solid var(--line);
 }
-.run-form, .compose-form, .inline-form {
+.compose-form, .inline-form {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
@@ -1585,7 +1590,36 @@ th {
   margin-bottom: 16px;
 }
 .run-form {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.run-basic {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(180px, 1.3fr) minmax(140px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+.advanced-options {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcf9;
+}
+.advanced-options summary {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  color: var(--accent-dark);
+  cursor: pointer;
+  font-weight: 800;
+}
+.advanced-grid {
+  display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid var(--line);
 }
 .compose-form { grid-template-columns: 1fr auto; }
 .stack-form {
@@ -1651,7 +1685,7 @@ code {
   .topbar { align-items: flex-start; flex-direction: column; padding: 12px 0; width: min(100vw - 24px, 1180px); }
   header form { align-self: stretch; }
   header form button { width: 100%; }
-  .stats, .run-form, .compose-form, .inline-form { grid-template-columns: 1fr; }
+  .stats, .compose-form, .inline-form, .run-basic, .advanced-grid { grid-template-columns: 1fr; }
   .shell { width: min(100vw - 24px, 1120px); margin-top: 12px; }
 }
 CSS;
