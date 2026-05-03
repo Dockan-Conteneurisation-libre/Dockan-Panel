@@ -18,6 +18,7 @@ It can:
 - run an image with a name and optional port
 - run `dockan compose up`, `down`, `redeploy`, and `health` for a chosen `dockan.yml`
 - manage Portainer-style stacks from the UI by saving `dockan.yml` files, then deploying, stopping, redeploying, and checking health
+- import required stack images from a local Dockan registry folder before deployment
 
 ## Start
 
@@ -46,6 +47,11 @@ This compose file uses `isolation: none` because the panel is an admin UI: it
 must call the host `dockan` CLI and manage the host Dockan containers.
 
 Stacks and backups are stored in the persistent `dockan-panel-data` volume.
+
+On the Stacks page, fill `Required images` and `Registry folder`, then click
+`Import Required Images`. This runs `dockan pull <image> <registry-folder>` for
+each image. If the registry folder is empty, Dockan uses its default local
+registry.
 
 ### Direct PHP
 

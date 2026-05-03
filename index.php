@@ -97,6 +97,7 @@ function handle_action(string $action, string $dockan): string
         'stack-down' => stack_compose_action($dockan, 'down'),
         'stack-redeploy' => stack_compose_action($dockan, 'redeploy'),
         'stack-health' => stack_compose_action($dockan, 'health'),
+        'stack-import-required' => stack_import_required_images($dockan),
         default => throw new RuntimeException('Unknown action.'),
     };
 }
@@ -128,20 +129,9 @@ function stack_save(): string
 {
     $name = clean_stack_name(required_post('name'));
     $yaml = trim((string) ($_POST['yaml'] ?? ''));
-    if ($yaml === '') {
-        throw new RuntimeException('Stack YAML is empty.');
-    }
-    if (strlen($yaml) > 512 * 1024) {
-        throw new RuntimeException('Stack YAML is too large.');
-    }
-    $dir = stack_dir($name);
-    if (!is_dir($dir) && !mkdir($dir, 0755, true)) {
-        throw new RuntimeException('Unable to create stack directory.');
-    }
-    $file = stack_file($name);
-    if (file_put_contents($file, $yaml . "\n") === false) {
-        throw new RuntimeException('Unable to save stack.');
-    }
+    $requiredImages = parse_image_list((string) ($_POST['required_images'] ?? ''));
+    $registryDir = trim((string) ($_POST['registry_dir'] ?? ''));
+    persist_stack($name, $yaml, $requiredImages, $registryDir);
     $_GET['stack'] = $name;
     return 'Stack saved: ' . $name;
 }
@@ -153,9 +143,10 @@ function stack_delete(): string
     if (!is_dir($dir)) {
         throw new RuntimeException('Stack not found.');
     }
-    $file = stack_file($name);
-    if (is_file($file) && !unlink($file)) {
-        throw new RuntimeException('Unable to delete stack file.');
+    foreach ([stack_file($name), stack_required_images_file($name), stack_registry_file($name)] as $file) {
+        if (is_file($file) && !unlink($file)) {
+            throw new RuntimeException('Unable to delete stack file.');
+        }
     }
     if (!rmdir($dir)) {
         throw new RuntimeException('Unable to delete stack directory.');
@@ -172,6 +163,37 @@ function stack_compose_action(string $dockan, string $action): string
         throw new RuntimeException('Stack not found.');
     }
     return command_text(run_dockan($dockan, ['compose', $action, '-f', $file]));
+}
+
+function stack_import_required_images(string $dockan): string
+{
+    $name = clean_stack_name(required_post('name'));
+    $yaml = trim((string) ($_POST['yaml'] ?? ''));
+    $requiredImages = parse_image_list((string) ($_POST['required_images'] ?? ''));
+    $registryDir = trim((string) ($_POST['registry_dir'] ?? ''));
+    if ($yaml !== '') {
+        persist_stack($name, $yaml, $requiredImages, $registryDir);
+    }
+    if (!$requiredImages && is_file(stack_required_images_file($name))) {
+        $requiredImages = parse_image_list((string) file_get_contents(stack_required_images_file($name)));
+    }
+    if (!$requiredImages && is_file(stack_file($name))) {
+        $requiredImages = detect_stack_images((string) file_get_contents(stack_file($name)));
+    }
+    if (!$requiredImages) {
+        throw new RuntimeException('No required images found.');
+    }
+    $output = [];
+    foreach ($requiredImages as $image) {
+        $args = ['pull', $image];
+        if ($registryDir !== '') {
+            $args[] = $registryDir;
+        }
+        $output[] = '$ dockan ' . implode(' ', $args);
+        $output[] = command_text(run_dockan($dockan, $args));
+    }
+    $_GET['stack'] = $name;
+    return trim(implode("\n", $output));
 }
 
 function backup_volume(string $dockan, string $name): string
@@ -370,6 +392,10 @@ function stacks_content(string $dockan): string
     }
     $yaml = $selected !== '' && is_file(stack_file($selected)) ? (string) file_get_contents(stack_file($selected)) : default_stack_yaml();
     $nameValue = $selected !== '' ? $selected : 'my-stack';
+    $requiredImages = $selected !== '' && is_file(stack_required_images_file($selected))
+        ? parse_image_list((string) file_get_contents(stack_required_images_file($selected)))
+        : detect_stack_images($yaml);
+    $registryDir = $selected !== '' && is_file(stack_registry_file($selected)) ? trim((string) file_get_contents(stack_registry_file($selected))) : '';
 
     $list = '<div class="table-wrap"><table><thead><tr><th>Name</th><th>File</th><th>Actions</th></tr></thead><tbody>';
     foreach ($stacks as $stack) {
@@ -390,7 +416,10 @@ function stacks_content(string $dockan): string
         ($selected !== '' ? '<input type="hidden" name="stack" value="' . e($selected) . '">' : '') .
         '<label>Stack name<input name="name" value="' . e($nameValue) . '" placeholder="my-stack" required></label>' .
         '<label>dockan.yml<textarea name="yaml" class="stack-editor" spellcheck="false" required>' . e($yaml) . '</textarea></label>' .
+        '<label>Required images<textarea name="required_images" class="small-editor" spellcheck="false" placeholder="myapp:latest&#10;mariadb:local">' . e(implode("\n", $requiredImages)) . '</textarea></label>' .
+        '<label>Registry folder<input name="registry_dir" value="' . e($registryDir) . '" placeholder="/srv/dockan-registry or empty for default"></label>' .
         '<div class="actions"><button name="action" value="stack-save">Save Stack</button>' .
+        action_submit('stack-import-required', 'Import Required Images') .
         ($selected !== '' ? action_submit('stack-up', 'Deploy') . action_submit('stack-redeploy', 'Redeploy') . action_submit('stack-health', 'Health') : '') .
         '</div></form>';
 
@@ -632,6 +661,42 @@ function stack_file(string $name): string
     return stack_dir($name) . '/dockan.yml';
 }
 
+function stack_required_images_file(string $name): string
+{
+    return stack_dir($name) . '/required-images.txt';
+}
+
+function stack_registry_file(string $name): string
+{
+    return stack_dir($name) . '/registry-dir.txt';
+}
+
+function persist_stack(string $name, string $yaml, array $requiredImages, string $registryDir): void
+{
+    if ($yaml === '') {
+        throw new RuntimeException('Stack YAML is empty.');
+    }
+    if (strlen($yaml) > 512 * 1024) {
+        throw new RuntimeException('Stack YAML is too large.');
+    }
+    $dir = stack_dir($name);
+    if (!is_dir($dir) && !mkdir($dir, 0755, true)) {
+        throw new RuntimeException('Unable to create stack directory.');
+    }
+    if (file_put_contents(stack_file($name), $yaml . "\n") === false) {
+        throw new RuntimeException('Unable to save stack.');
+    }
+    if (!$requiredImages) {
+        $requiredImages = detect_stack_images($yaml);
+    }
+    if (file_put_contents(stack_required_images_file($name), implode("\n", $requiredImages) . "\n") === false) {
+        throw new RuntimeException('Unable to save required images.');
+    }
+    if (file_put_contents(stack_registry_file($name), $registryDir . "\n") === false) {
+        throw new RuntimeException('Unable to save registry folder.');
+    }
+}
+
 function stack_names(): array
 {
     $entries = is_dir(STACKS_DIR) ? scandir(STACKS_DIR) : [];
@@ -665,6 +730,28 @@ services:
     restart: always
     healthcheck: CMD-SHELL curl -f http://127.0.0.1:8080/
 YAML;
+}
+
+function detect_stack_images(string $yaml): array
+{
+    preg_match_all('/^\s*image:\s*["\']?([^"\'\s#]+)["\']?/m', $yaml, $matches);
+    return parse_image_list(implode("\n", $matches[1] ?? []));
+}
+
+function parse_image_list(string $text): array
+{
+    $images = [];
+    foreach (preg_split('/[\s,]+/', trim($text)) ?: [] as $image) {
+        $image = trim($image);
+        if ($image === '' || str_starts_with($image, '#')) {
+            continue;
+        }
+        if (!preg_match('/^[A-Za-z0-9._\/:-]+$/', $image)) {
+            throw new RuntimeException('Invalid image reference: ' . $image);
+        }
+        $images[$image] = true;
+    }
+    return array_keys($images);
 }
 
 function human_bytes(int $bytes): string
@@ -811,6 +898,9 @@ textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
   line-height: 1.5;
+}
+.small-editor {
+  min-height: 100px;
 }
 input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
