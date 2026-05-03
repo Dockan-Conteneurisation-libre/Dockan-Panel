@@ -20,6 +20,7 @@ It can:
 - manage Portainer-style stacks from the UI by saving `dockan.yml` files, then deploying, stopping, redeploying, and checking health
 - import required stack images from a local Dockan registry folder before deployment
 - open a container detail page with actions, inspect output, logs, a live PTY terminal, and a one-shot exec fallback
+- manage admin users with password login, optional authenticator-app 2FA, and passkeys
 
 ## Start
 
@@ -38,16 +39,17 @@ Open:
 http://127.0.0.1:9090
 ```
 
-Default token from `dockan.yml`:
+On first launch, create the first admin account in the setup page. There is no
+default password and no default token.
 
-```text
-dockan
-```
+After login, open `Security` to add other admins, change passwords, enable 2FA,
+or register passkeys. Passkeys require `localhost`, `127.0.0.1`, or HTTPS.
 
 This compose file uses `isolation: none` because the panel is an admin UI: it
 must call the host `dockan` CLI and manage the host Dockan containers.
 
-Stacks and backups are stored in the persistent `dockan-panel-data` volume.
+Users, passkeys, stacks, and backups are stored in the persistent
+`dockan-panel-data` volume.
 
 On the Stacks page, fill `Required images` and `Registry folder`, then click
 `Import Required Images`. This runs `dockan pull <image> <registry-folder>` for
@@ -56,11 +58,10 @@ registry.
 
 ### Direct PHP
 
-You can also run it directly with PHP. Set a token first:
+You can also run it directly with PHP:
 
 ```bash
 cd /path/to/Dockan-Panel
-export DOCKAN_UI_TOKEN="change-me"
 php -S 127.0.0.1:9090 index.php
 ```
 
@@ -70,7 +71,7 @@ Open:
 http://127.0.0.1:9090
 ```
 
-Use the token from `DOCKAN_UI_TOKEN` to log in.
+Create the first admin account on the setup page.
 
 If `dockan` is installed in `~/.local/bin`, the panel adds that directory to
 `PATH` automatically.
@@ -89,3 +90,7 @@ there you can run commands inside it, read logs, inspect metadata, stop it,
 remove it, or run its healthcheck.
 
 Keep it bound to `127.0.0.1` unless you put it behind proper authentication, HTTPS, and firewall rules.
+
+Passkeys are verified server-side with the browser challenge and signature. They
+are still browser-dependent: if your browser cannot expose the WebAuthn public
+key during registration, use password plus 2FA instead.

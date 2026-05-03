@@ -8,6 +8,7 @@ const STORAGE_DIR = __DIR__ . '/storage';
 const BACKUP_DIR = STORAGE_DIR . '/backups';
 const STACKS_DIR = STORAGE_DIR . '/stacks';
 const TERMINALS_DIR = STORAGE_DIR . '/terminals';
+const AUTH_FILE = STORAGE_DIR . '/auth-users.json';
 
 ensure_storage();
 
@@ -17,7 +18,6 @@ if (($_GET['asset'] ?? '') === 'logo') {
     exit;
 }
 
-$token = getenv('DOCKAN_UI_TOKEN') ?: '';
 $dockan = getenv('DOCKAN_BIN') ?: 'dockan';
 $flash = null;
 $error = null;
@@ -30,20 +30,32 @@ if (isset($_POST['logout'])) {
     exit;
 }
 
-if ($token === '') {
-    render_page('Locked', locked_content(), false);
+if (!auth_has_users()) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['setup'] ?? '') === '1') {
+        try {
+            create_first_admin();
+            $_SESSION['csrf'] = bin2hex(random_bytes(24));
+            header('Location: ' . self_url());
+            exit;
+        } catch (Throwable $e) {
+            $error = $e->getMessage();
+        }
+    }
+    render_page('Setup', setup_content($error), false);
     exit;
 }
 
 if (!is_logged_in()) {
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['token'] ?? '') !== '') {
-        if (hash_equals($token, (string) $_POST['token'])) {
-            $_SESSION['dockan_ui_auth'] = true;
-            $_SESSION['csrf'] = bin2hex(random_bytes(24));
-            header('Location: ' . self_url());
-            exit;
+    if (isset($_GET['webauthn'])) {
+        handle_webauthn_api();
+        exit;
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['login'] ?? '') === '1') {
+        try {
+            login_with_password();
+        } catch (Throwable $e) {
+            $error = $e->getMessage();
         }
-        $error = 'Invalid token.';
     }
     render_page('Login', login_content($error), false);
     exit;
@@ -55,6 +67,11 @@ if (empty($_SESSION['csrf'])) {
 
 if (isset($_GET['terminal_api'])) {
     handle_terminal_api($dockan);
+    exit;
+}
+
+if (isset($_GET['webauthn'])) {
+    handle_webauthn_api();
     exit;
 }
 
@@ -77,6 +94,7 @@ $content = match ($view) {
     'stacks' => stacks_content($dockan),
     'compose' => compose_content($dockan),
     'logs' => logs_content($dockan),
+    'security' => security_content(),
     default => dashboard_content($dockan),
 };
 
@@ -106,6 +124,13 @@ function handle_action(string $action, string $dockan): string
         'stack-redeploy' => stack_compose_action($dockan, 'redeploy'),
         'stack-health' => stack_compose_action($dockan, 'health'),
         'stack-import-required' => stack_import_required_images($dockan),
+        'add-user' => add_user_action(),
+        'delete-user' => delete_user_action(),
+        'set-password' => set_password_action(),
+        'begin-totp' => begin_totp_action(),
+        'confirm-totp' => confirm_totp_action(),
+        'disable-totp' => disable_totp_action(),
+        'delete-passkey' => delete_passkey_action(),
         default => throw new RuntimeException('Unknown action.'),
     };
 }
@@ -542,6 +567,518 @@ function command_text(array $result): string
     return $text;
 }
 
+function auth_has_users(): bool
+{
+    return count(auth_users()) > 0;
+}
+
+function auth_users(): array
+{
+    if (!is_file(AUTH_FILE)) {
+        return [];
+    }
+    $data = json_decode((string) file_get_contents(AUTH_FILE), true);
+    return is_array($data) && isset($data['users']) && is_array($data['users']) ? $data['users'] : [];
+}
+
+function save_auth_users(array $users): void
+{
+    $data = ['version' => 1, 'users' => array_values($users)];
+    if (file_put_contents(AUTH_FILE, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX) === false) {
+        throw new RuntimeException('Unable to save users.');
+    }
+    @chmod(AUTH_FILE, 0600);
+}
+
+function find_user(string $username): ?array
+{
+    foreach (auth_users() as $user) {
+        if (hash_equals((string) ($user['username'] ?? ''), $username)) {
+            return $user;
+        }
+    }
+    return null;
+}
+
+function update_user(string $username, callable $callback): void
+{
+    $users = auth_users();
+    foreach ($users as $index => $user) {
+        if (($user['username'] ?? '') === $username) {
+            $users[$index] = $callback($user);
+            save_auth_users($users);
+            return;
+        }
+    }
+    throw new RuntimeException('User not found.');
+}
+
+function clean_username(string $username): string
+{
+    $username = strtolower(trim($username));
+    if (!preg_match('/^[a-z0-9_.-]{2,32}$/', $username)) {
+        throw new RuntimeException('Invalid username. Use 2-32 lowercase letters, numbers, dot, dash, or underscore.');
+    }
+    return $username;
+}
+
+function validate_password(string $password): void
+{
+    if (strlen($password) < 10) {
+        throw new RuntimeException('Password must contain at least 10 characters.');
+    }
+}
+
+function create_first_admin(): void
+{
+    if (auth_has_users()) {
+        throw new RuntimeException('Setup already completed.');
+    }
+    $username = clean_username((string) ($_POST['username'] ?? 'admin'));
+    $password = (string) ($_POST['password'] ?? '');
+    $confirm = (string) ($_POST['confirm_password'] ?? '');
+    validate_password($password);
+    if (!hash_equals($password, $confirm)) {
+        throw new RuntimeException('Passwords do not match.');
+    }
+    $user = [
+        'username' => $username,
+        'display_name' => $username,
+        'role' => 'admin',
+        'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+        'totp_secret' => '',
+        'passkeys' => [],
+        'created_at' => date(DATE_ATOM),
+    ];
+    save_auth_users([$user]);
+}
+
+function login_with_password(): void
+{
+    $username = clean_username((string) ($_POST['username'] ?? ''));
+    $password = (string) ($_POST['password'] ?? '');
+    $totp = trim((string) ($_POST['totp'] ?? ''));
+    $user = find_user($username);
+    if (!$user || !password_verify($password, (string) ($user['password_hash'] ?? ''))) {
+        throw new RuntimeException('Invalid username or password.');
+    }
+    $secret = (string) ($user['totp_secret'] ?? '');
+    if ($secret !== '') {
+        if ($totp === '' || !totp_verify($secret, $totp)) {
+            throw new RuntimeException('Invalid 2FA code.');
+        }
+    }
+    complete_login($username);
+}
+
+function complete_login(string $username): void
+{
+    start_user_session($username);
+    header('Location: ' . self_url());
+    exit;
+}
+
+function start_user_session(string $username): void
+{
+    session_regenerate_id(true);
+    $_SESSION['dockan_user'] = $username;
+    $_SESSION['csrf'] = bin2hex(random_bytes(24));
+}
+
+function current_user(): ?array
+{
+    $username = (string) ($_SESSION['dockan_user'] ?? '');
+    return $username === '' ? null : find_user($username);
+}
+
+function require_admin(): array
+{
+    $user = current_user();
+    if (!$user || ($user['role'] ?? '') !== 'admin') {
+        throw new RuntimeException('Admin rights required.');
+    }
+    return $user;
+}
+
+function add_user_action(): string
+{
+    require_admin();
+    $username = clean_username(required_post('username'));
+    $password = required_post('password');
+    validate_password($password);
+    if (find_user($username)) {
+        throw new RuntimeException('User already exists.');
+    }
+    $users = auth_users();
+    $users[] = [
+        'username' => $username,
+        'display_name' => $username,
+        'role' => 'admin',
+        'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+        'totp_secret' => '',
+        'passkeys' => [],
+        'created_at' => date(DATE_ATOM),
+    ];
+    save_auth_users($users);
+    return 'User created: ' . $username;
+}
+
+function delete_user_action(): string
+{
+    $admin = require_admin();
+    $username = clean_username(required_post('username'));
+    if ($username === ($admin['username'] ?? '')) {
+        throw new RuntimeException('You cannot delete your own account.');
+    }
+    $users = array_values(array_filter(auth_users(), static fn (array $user): bool => ($user['username'] ?? '') !== $username));
+    if (count($users) === count(auth_users())) {
+        throw new RuntimeException('User not found.');
+    }
+    if (!$users) {
+        throw new RuntimeException('At least one admin user is required.');
+    }
+    save_auth_users($users);
+    return 'User deleted: ' . $username;
+}
+
+function set_password_action(): string
+{
+    require_admin();
+    $username = clean_username(required_post('username'));
+    $password = required_post('password');
+    validate_password($password);
+    update_user($username, static function (array $user) use ($password): array {
+        $user['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+        return $user;
+    });
+    return 'Password updated: ' . $username;
+}
+
+function begin_totp_action(): string
+{
+    $user = require_admin();
+    $secret = totp_secret();
+    $_SESSION['pending_totp_secret'] = $secret;
+    return "2FA secret generated. Scan it in your authenticator app, then enter the 6-digit code below.\nSecret: " . $secret;
+}
+
+function confirm_totp_action(): string
+{
+    $user = require_admin();
+    $secret = (string) ($_SESSION['pending_totp_secret'] ?? '');
+    if ($secret === '') {
+        throw new RuntimeException('Generate a 2FA secret first.');
+    }
+    if (!totp_verify($secret, required_post('totp'))) {
+        throw new RuntimeException('Invalid 2FA code.');
+    }
+    update_user((string) $user['username'], static function (array $item) use ($secret): array {
+        $item['totp_secret'] = $secret;
+        return $item;
+    });
+    unset($_SESSION['pending_totp_secret']);
+    return '2FA enabled.';
+}
+
+function disable_totp_action(): string
+{
+    $user = require_admin();
+    update_user((string) $user['username'], static function (array $item): array {
+        $item['totp_secret'] = '';
+        return $item;
+    });
+    unset($_SESSION['pending_totp_secret']);
+    return '2FA disabled.';
+}
+
+function delete_passkey_action(): string
+{
+    $user = require_admin();
+    $id = required_post('id');
+    update_user((string) $user['username'], static function (array $item) use ($id): array {
+        $item['passkeys'] = array_values(array_filter($item['passkeys'] ?? [], static fn (array $key): bool => ($key['id'] ?? '') !== $id));
+        return $item;
+    });
+    return 'Passkey deleted.';
+}
+
+function totp_secret(): string
+{
+    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    $secret = '';
+    for ($i = 0; $i < 32; $i++) {
+        $secret .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+    }
+    return $secret;
+}
+
+function totp_verify(string $secret, string $code): bool
+{
+    $code = preg_replace('/\D+/', '', $code) ?? '';
+    if (strlen($code) !== 6) {
+        return false;
+    }
+    $time = intdiv(time(), 30);
+    for ($offset = -1; $offset <= 1; $offset++) {
+        if (hash_equals(totp_code($secret, $time + $offset), $code)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function totp_code(string $secret, int $counter): string
+{
+    $key = base32_decode($secret);
+    $binary = pack('N*', 0) . pack('N*', $counter);
+    $hash = hash_hmac('sha1', $binary, $key, true);
+    $offset = ord($hash[19]) & 0xf;
+    $value = ((ord($hash[$offset]) & 0x7f) << 24) |
+        ((ord($hash[$offset + 1]) & 0xff) << 16) |
+        ((ord($hash[$offset + 2]) & 0xff) << 8) |
+        (ord($hash[$offset + 3]) & 0xff);
+    return str_pad((string) ($value % 1000000), 6, '0', STR_PAD_LEFT);
+}
+
+function base32_decode(string $text): string
+{
+    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    $text = strtoupper(preg_replace('/[^A-Z2-7]/', '', $text) ?? '');
+    $bits = '';
+    foreach (str_split($text) as $char) {
+        $value = strpos($alphabet, $char);
+        if ($value === false) {
+            continue;
+        }
+        $bits .= str_pad(decbin($value), 5, '0', STR_PAD_LEFT);
+    }
+    $output = '';
+    foreach (str_split($bits, 8) as $byte) {
+        if (strlen($byte) === 8) {
+            $output .= chr(bindec($byte));
+        }
+    }
+    return $output;
+}
+
+function handle_webauthn_api(): void
+{
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        $action = (string) ($_GET['webauthn'] ?? '');
+        $body = json_body();
+        $payload = match ($action) {
+            'register-options' => webauthn_register_options($body),
+            'register-verify' => webauthn_register_verify($body),
+            'login-options' => webauthn_login_options($body),
+            'login-verify' => webauthn_login_verify($body),
+            default => throw new RuntimeException('Unknown passkey action.'),
+        };
+        json_response(['ok' => true] + $payload);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        json_response(['ok' => false, 'error' => $e->getMessage()]);
+    }
+}
+
+function json_body(): array
+{
+    $raw = (string) file_get_contents('php://input');
+    if ($raw === '') {
+        return [];
+    }
+    $data = json_decode($raw, true);
+    if (!is_array($data)) {
+        throw new RuntimeException('Invalid JSON payload.');
+    }
+    return $data;
+}
+
+function verify_json_csrf(array $body): void
+{
+    $csrf = (string) ($body['csrf'] ?? '');
+    if ($csrf === '' || !hash_equals((string) ($_SESSION['csrf'] ?? ''), $csrf)) {
+        throw new RuntimeException('Invalid session token.');
+    }
+}
+
+function webauthn_register_options(array $body): array
+{
+    verify_json_csrf($body);
+    $user = require_admin();
+    $challenge = base64url_encode(random_bytes(32));
+    $_SESSION['webauthn_register_challenge'] = $challenge;
+    return [
+        'publicKey' => [
+            'challenge' => $challenge,
+            'rp' => ['name' => APP_NAME],
+            'user' => [
+                'id' => base64url_encode((string) $user['username']),
+                'name' => (string) $user['username'],
+                'displayName' => (string) ($user['display_name'] ?? $user['username']),
+            ],
+            'pubKeyCredParams' => [
+                ['type' => 'public-key', 'alg' => -7],
+                ['type' => 'public-key', 'alg' => -257],
+            ],
+            'authenticatorSelection' => [
+                'residentKey' => 'preferred',
+                'userVerification' => 'preferred',
+            ],
+            'timeout' => 60000,
+            'attestation' => 'none',
+        ],
+    ];
+}
+
+function webauthn_register_verify(array $body): array
+{
+    verify_json_csrf($body);
+    $user = require_admin();
+    $clientData = webauthn_client_data((string) ($body['clientDataJSON'] ?? ''), 'webauthn.create', (string) ($_SESSION['webauthn_register_challenge'] ?? ''));
+    $id = (string) ($body['id'] ?? '');
+    $publicKey = base64url_decode((string) ($body['publicKey'] ?? ''));
+    if ($id === '' || $publicKey === '') {
+        throw new RuntimeException('This browser did not return a usable passkey public key.');
+    }
+    $pem = der_public_key_to_pem($publicKey);
+    if (!openssl_pkey_get_public($pem)) {
+        throw new RuntimeException('Invalid passkey public key.');
+    }
+    update_user((string) $user['username'], static function (array $item) use ($id, $pem, $clientData): array {
+        $keys = is_array($item['passkeys'] ?? null) ? $item['passkeys'] : [];
+        foreach ($keys as $key) {
+            if (($key['id'] ?? '') === $id) {
+                throw new RuntimeException('This passkey is already registered.');
+            }
+        }
+        $keys[] = [
+            'id' => $id,
+            'name' => 'Passkey ' . date('Y-m-d H:i'),
+            'public_key' => $pem,
+            'origin' => (string) ($clientData['origin'] ?? ''),
+            'created_at' => date(DATE_ATOM),
+        ];
+        $item['passkeys'] = $keys;
+        return $item;
+    });
+    unset($_SESSION['webauthn_register_challenge']);
+    return ['message' => 'Passkey registered.'];
+}
+
+function webauthn_login_options(array $body): array
+{
+    $username = clean_username((string) ($body['username'] ?? ''));
+    $user = find_user($username);
+    $keys = is_array($user['passkeys'] ?? null) ? $user['passkeys'] : [];
+    if (!$user || !$keys) {
+        throw new RuntimeException('No passkey is registered for this user.');
+    }
+    $challenge = base64url_encode(random_bytes(32));
+    $_SESSION['webauthn_login_challenge'] = $challenge;
+    $_SESSION['webauthn_login_user'] = $username;
+    return [
+        'publicKey' => [
+            'challenge' => $challenge,
+            'allowCredentials' => array_map(static fn (array $key): array => [
+                'type' => 'public-key',
+                'id' => (string) ($key['id'] ?? ''),
+            ], $keys),
+            'userVerification' => 'preferred',
+            'timeout' => 60000,
+        ],
+    ];
+}
+
+function webauthn_login_verify(array $body): array
+{
+    $username = clean_username((string) ($_SESSION['webauthn_login_user'] ?? ''));
+    $user = find_user($username);
+    $keys = is_array($user['passkeys'] ?? null) ? $user['passkeys'] : [];
+    if (!$user || !$keys) {
+        throw new RuntimeException('Passkey user not found.');
+    }
+    webauthn_client_data((string) ($body['clientDataJSON'] ?? ''), 'webauthn.get', (string) ($_SESSION['webauthn_login_challenge'] ?? ''));
+    $id = (string) ($body['id'] ?? '');
+    $match = null;
+    foreach ($keys as $key) {
+        if (($key['id'] ?? '') === $id) {
+            $match = $key;
+            break;
+        }
+    }
+    if (!$match) {
+        throw new RuntimeException('Unknown passkey.');
+    }
+    $authenticatorData = base64url_decode((string) ($body['authenticatorData'] ?? ''));
+    $clientDataJSON = base64url_decode((string) ($body['clientDataJSON'] ?? ''));
+    $signature = base64url_decode((string) ($body['signature'] ?? ''));
+    if ($authenticatorData === '' || $clientDataJSON === '' || $signature === '') {
+        throw new RuntimeException('Incomplete passkey response.');
+    }
+    $signed = $authenticatorData . hash('sha256', $clientDataJSON, true);
+    $valid = openssl_verify($signed, $signature, (string) ($match['public_key'] ?? ''), OPENSSL_ALGO_SHA256);
+    if ($valid !== 1) {
+        throw new RuntimeException('Invalid passkey signature.');
+    }
+    unset($_SESSION['webauthn_login_challenge'], $_SESSION['webauthn_login_user']);
+    start_user_session($username);
+    return ['message' => 'Logged in.', 'redirect' => self_url()];
+}
+
+function webauthn_client_data(string $encoded, string $expectedType, string $expectedChallenge): array
+{
+    if ($expectedChallenge === '') {
+        throw new RuntimeException('Missing passkey challenge.');
+    }
+    $json = base64url_decode($encoded);
+    $data = json_decode($json, true);
+    if (!is_array($data)) {
+        throw new RuntimeException('Invalid passkey client data.');
+    }
+    if (($data['type'] ?? '') !== $expectedType) {
+        throw new RuntimeException('Invalid passkey response type.');
+    }
+    if (!hash_equals($expectedChallenge, (string) ($data['challenge'] ?? ''))) {
+        throw new RuntimeException('Invalid passkey challenge.');
+    }
+    webauthn_validate_origin((string) ($data['origin'] ?? ''));
+    return $data;
+}
+
+function webauthn_validate_origin(string $origin): void
+{
+    $originHost = parse_url($origin, PHP_URL_HOST);
+    $requestHost = explode(':', (string) ($_SERVER['HTTP_HOST'] ?? ''))[0] ?? '';
+    if ($originHost === null || $originHost === false || $requestHost === '' || !hash_equals($requestHost, (string) $originHost)) {
+        throw new RuntimeException('Invalid passkey origin.');
+    }
+}
+
+function der_public_key_to_pem(string $der): string
+{
+    return "-----BEGIN PUBLIC KEY-----\n" . chunk_split(base64_encode($der), 64, "\n") . "-----END PUBLIC KEY-----\n";
+}
+
+function base64url_encode(string $value): string
+{
+    return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+}
+
+function base64url_decode(string $value): string
+{
+    $value = strtr($value, '-_', '+/');
+    $pad = strlen($value) % 4;
+    if ($pad > 0) {
+        $value .= str_repeat('=', 4 - $pad);
+    }
+    $decoded = base64_decode($value, true);
+    if ($decoded === false) {
+        throw new RuntimeException('Invalid base64url value.');
+    }
+    return $decoded;
+}
+
 function binary_exists(string $name): bool
 {
     $result = run_command(['sh', '-lc', 'command -v ' . escapeshellarg($name) . ' >/dev/null 2>&1']);
@@ -752,6 +1289,75 @@ function networks_content(string $dockan): string
     }
     $body .= '</tbody></table></div>';
     return section('Networks', $body);
+}
+
+function security_content(): string
+{
+    $user = require_admin();
+    $users = auth_users();
+    $rows = '<div class="table-wrap"><table><thead><tr><th>User</th><th>Role</th><th>2FA</th><th>Passkeys</th><th>Actions</th></tr></thead><tbody>';
+    foreach ($users as $item) {
+        $username = (string) ($item['username'] ?? '');
+        $passkeys = is_array($item['passkeys'] ?? null) ? count($item['passkeys']) : 0;
+        $rows .= '<tr><td>' . e($username) . '</td><td>' . e((string) ($item['role'] ?? 'admin')) . '</td><td>' . (($item['totp_secret'] ?? '') !== '' ? status_badge('enabled') : status_badge('disabled')) . '</td><td>' . e((string) $passkeys) . '</td><td class="actions">' .
+            post_button('delete-user', ['username' => $username], 'Delete', 'danger') .
+            '</td></tr>';
+    }
+    $rows .= '</tbody></table></div>';
+
+    $add = '<form method="post" class="inline-form">' . csrf_field() .
+        '<input type="hidden" name="action" value="add-user">' .
+        '<input name="username" placeholder="admin2" required>' .
+        '<input type="password" name="password" placeholder="temporary-password" required>' .
+        '<button>Add Admin</button></form>';
+
+    $password = '<form method="post" class="inline-form">' . csrf_field() .
+        '<input type="hidden" name="action" value="set-password">' .
+        '<input name="username" value="' . e((string) $user['username']) . '" required>' .
+        '<input type="password" name="password" placeholder="new-password" required>' .
+        '<button>Set Password</button></form>';
+
+    $pending = (string) ($_SESSION['pending_totp_secret'] ?? '');
+    $totpUri = $pending !== '' ? totp_uri((string) $user['username'], $pending) : '';
+    $totp = '<div class="security-grid">' .
+        '<div>' . (($user['totp_secret'] ?? '') !== '' ? '<p class="muted">2FA is enabled for your account.</p>' : '<p class="muted">2FA is disabled for your account.</p>') .
+        '<div class="actions">' .
+        post_button('begin-totp', [], 'Generate 2FA Secret') .
+        (($user['totp_secret'] ?? '') !== '' ? post_button('disable-totp', [], 'Disable 2FA', 'danger') : '') .
+        '</div></div>' .
+        ($pending !== '' ? '<div><label>Authenticator URI<input readonly value="' . e($totpUri) . '"></label><form method="post" class="inline-form">' . csrf_field() . '<input type="hidden" name="action" value="confirm-totp"><input name="totp" placeholder="123456" required><button>Enable 2FA</button></form></div>' : '') .
+        '</div>';
+
+    $passkeys = '<div class="passkey-panel" data-passkey-user="' . e((string) $user['username']) . '" data-csrf="' . e((string) ($_SESSION['csrf'] ?? '')) . '">' .
+        '<div class="actions"><button type="button" data-passkey-register>Add Passkey</button><span class="muted" data-passkey-status></span></div>' .
+        '<p class="muted">Passkeys work on localhost or HTTPS and are stored only in this panel user database.</p>' .
+        passkeys_list($user) .
+        '</div>';
+
+    return section('Users', $add . $rows) .
+        section('Password', $password) .
+        section('Two-Factor Authentication', $totp) .
+        section('Passkeys', $passkeys);
+}
+
+function passkeys_list(array $user): string
+{
+    $keys = is_array($user['passkeys'] ?? null) ? $user['passkeys'] : [];
+    if (!$keys) {
+        return '<p class="muted">No passkeys registered.</p>';
+    }
+    $html = '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
+    foreach ($keys as $key) {
+        $html .= '<tr><td>' . e((string) ($key['name'] ?? 'Passkey')) . '</td><td>' . e((string) ($key['created_at'] ?? '')) . '</td><td>' .
+            post_button('delete-passkey', ['id' => (string) ($key['id'] ?? '')], 'Delete', 'danger') .
+            '</td></tr>';
+    }
+    return $html . '</tbody></table></div>';
+}
+
+function totp_uri(string $username, string $secret): string
+{
+    return 'otpauth://totp/' . rawurlencode(APP_NAME . ':' . $username) . '?secret=' . rawurlencode($secret) . '&issuer=' . rawurlencode(APP_NAME) . '&algorithm=SHA1&digits=6&period=30';
 }
 
 function compose_content(string $dockan): string
@@ -980,16 +1586,17 @@ function verify_csrf(): void
     }
 }
 
-function locked_content(): string
-{
-    return '<main class="auth"><h1>Dockan Panel</h1><p>Set <code>DOCKAN_UI_TOKEN</code> before starting the PHP server.</p><pre>export DOCKAN_UI_TOKEN="change-me"
-php -S 127.0.0.1:9090 index.php</pre></main>';
-}
-
 function login_content(?string $error): string
 {
     return '<main class="auth"><h1>Dockan Panel</h1>' . ($error ? '<div class="alert danger">' . e($error) . '</div>' : '') .
-        '<form method="post"><label>Access token<input type="password" name="token" autofocus required></label><button>Login</button></form></main>';
+        '<form method="post"><input type="hidden" name="login" value="1"><label>Username<input name="username" value="admin" autofocus required></label><label>Password<input type="password" name="password" required></label><label>2FA code<input name="totp" inputmode="numeric" placeholder="optional"></label><button>Login</button></form>' .
+        '<div class="passkey-panel login-passkey"><button type="button" data-passkey-login>Login with Passkey</button><span class="muted" data-passkey-status></span></div></main>';
+}
+
+function setup_content(?string $error): string
+{
+    return '<main class="auth"><h1>Setup Admin</h1>' . ($error ? '<div class="alert danger">' . e($error) . '</div>' : '') .
+        '<form method="post"><input type="hidden" name="setup" value="1"><label>Username<input name="username" value="admin" autofocus required></label><label>Password<input type="password" name="password" required></label><label>Confirm password<input type="password" name="confirm_password" required></label><button>Create Admin</button></form></main>';
 }
 
 function render_page(string $title, string $content, bool $with_nav, ?string $flash = null, ?string $error = null): void
@@ -1016,6 +1623,7 @@ function nav_html(): string
         'stacks' => 'Stacks',
         'compose' => 'Compose',
         'logs' => 'Logs',
+        'security' => 'Security',
     ];
     $html = '<header><div class="topbar"><a class="brand" href="?view=dashboard"><img src="?asset=logo" alt=""><span>Dockan Panel</span></a><nav>';
     foreach ($items as $key => $label) {
@@ -1033,7 +1641,7 @@ function page_title(string $view): string
 
 function is_logged_in(): bool
 {
-    return ($_SESSION['dockan_ui_auth'] ?? false) === true;
+    return current_user() !== null;
 }
 
 function self_url(): string
@@ -1325,6 +1933,94 @@ function terminal_js(): string
       if (data !== '') {
         event.preventDefault();
         send(data);
+      }
+    });
+  });
+  const b64ToBytes = (value) => {
+    value = value.replace(/-/g, '+').replace(/_/g, '/');
+    value += '='.repeat((4 - (value.length % 4)) % 4);
+    return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+  };
+  const bytesToB64 = (value) => {
+    const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+  const passkeyPost = async (action, payload = {}) => {
+    const response = await fetch('?webauthn=' + encodeURIComponent(action), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json();
+    if (!data.ok) throw new Error(data.error || 'Passkey error.');
+    return data;
+  };
+  const prepareCreateOptions = (options) => {
+    options.challenge = b64ToBytes(options.challenge);
+    options.user.id = b64ToBytes(options.user.id);
+    if (options.excludeCredentials) {
+      options.excludeCredentials = options.excludeCredentials.map((item) => ({ ...item, id: b64ToBytes(item.id) }));
+    }
+    return options;
+  };
+  const prepareGetOptions = (options) => {
+    options.challenge = b64ToBytes(options.challenge);
+    if (options.allowCredentials) {
+      options.allowCredentials = options.allowCredentials.map((item) => ({ ...item, id: b64ToBytes(item.id) }));
+    }
+    return options;
+  };
+  const setPasskeyStatus = (root, text) => {
+    const status = root.querySelector('[data-passkey-status]');
+    if (status) status.textContent = text;
+  };
+  document.querySelectorAll('[data-passkey-register]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const panel = button.closest('[data-passkey-user]');
+      try {
+        if (!window.PublicKeyCredential) throw new Error('Passkeys are not supported by this browser.');
+        setPasskeyStatus(panel, 'waiting for browser');
+        const options = await passkeyPost('register-options', { csrf: panel.dataset.csrf || '' });
+        const credential = await navigator.credentials.create({ publicKey: prepareCreateOptions(options.publicKey) });
+        if (!credential.response.getPublicKey) {
+          throw new Error('This browser cannot export the public key needed by Dockan Panel.');
+        }
+        await passkeyPost('register-verify', {
+          csrf: panel.dataset.csrf || '',
+          id: credential.id,
+          rawId: bytesToB64(credential.rawId),
+          clientDataJSON: bytesToB64(credential.response.clientDataJSON),
+          publicKey: bytesToB64(credential.response.getPublicKey())
+        });
+        setPasskeyStatus(panel, 'registered');
+        window.location.reload();
+      } catch (error) {
+        setPasskeyStatus(panel, error.message);
+      }
+    });
+  });
+  document.querySelectorAll('[data-passkey-login]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const panel = button.closest('.login-passkey');
+      const username = document.querySelector('input[name="username"]')?.value || '';
+      try {
+        if (!window.PublicKeyCredential) throw new Error('Passkeys are not supported by this browser.');
+        setPasskeyStatus(panel, 'waiting for browser');
+        const options = await passkeyPost('login-options', { username });
+        const assertion = await navigator.credentials.get({ publicKey: prepareGetOptions(options.publicKey) });
+        const result = await passkeyPost('login-verify', {
+          id: assertion.id,
+          rawId: bytesToB64(assertion.rawId),
+          clientDataJSON: bytesToB64(assertion.response.clientDataJSON),
+          authenticatorData: bytesToB64(assertion.response.authenticatorData),
+          signature: bytesToB64(assertion.response.signature),
+          userHandle: assertion.response.userHandle ? bytesToB64(assertion.response.userHandle) : ''
+        });
+        window.location.href = result.redirect || '/';
+      } catch (error) {
+        setPasskeyStatus(panel, error.message);
       }
     });
   });
@@ -1632,6 +2328,19 @@ th {
   display: grid;
   gap: 14px;
 }
+.security-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 14px;
+  align-items: start;
+}
+.passkey-panel {
+  display: grid;
+  gap: 12px;
+}
+.login-passkey {
+  margin-top: 14px;
+}
 .terminal-form {
   display: grid;
   gap: 12px;
@@ -1691,7 +2400,7 @@ code {
   .topbar { align-items: flex-start; flex-direction: column; padding: 12px 0; width: min(100vw - 24px, 1180px); }
   header form { align-self: stretch; }
   header form button { width: 100%; }
-  .stats, .compose-form, .inline-form, .run-basic, .advanced-grid { grid-template-columns: 1fr; }
+  .stats, .compose-form, .inline-form, .run-basic, .advanced-grid, .security-grid { grid-template-columns: 1fr; }
   .shell { width: min(100vw - 24px, 1120px); margin-top: 12px; }
 }
 CSS;

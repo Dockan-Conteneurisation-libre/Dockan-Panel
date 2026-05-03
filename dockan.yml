@@ -6,7 +6,6 @@ services:
     ports:
       - 9090:9090
     env:
-      - DOCKAN_UI_TOKEN=dockan
       - DOCKAN_BIN=dockan
     volumes:
       - dockan-panel-data:/app/storage
