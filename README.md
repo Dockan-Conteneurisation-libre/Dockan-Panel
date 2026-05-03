@@ -18,6 +18,8 @@
 This project is separate from the Dockan CLI repository. It is meant to live in
 its own repository and call the local `dockan` command installed on the machine.
 
+Current panel version: `v0.1.0`.
+
 It can:
 
 - list containers, images, volumes, and networks
@@ -32,7 +34,7 @@ It can:
 - run `dockan compose up`, `down`, `redeploy`, and `health` for a chosen `dockan.yml`
 - manage Portainer-style stacks from the UI by saving `dockan.yml` files, then deploying, stopping, redeploying, and checking health
 - import required stack images from a local Dockan registry folder before deployment
-- inspect Dockan, PHP, and FrankenPHP versions, preview dependency installs, install host packages/runtimes, and run Dockan updates
+- inspect Dockan, PHP, FrankenPHP, and Dockan Panel versions, preview dependency installs, install host packages/runtimes, run Dockan updates, and update the panel from GitHub
 - open a container detail page with actions, inspect output, logs, a live PTY terminal, and a one-shot exec fallback
 - manage admin users with password login, optional authenticator-app 2FA, and passkeys
 - install in the browser as a local PWA, with the Dockan logo and standalone window mode
@@ -103,8 +105,9 @@ or register passkeys. Passkeys require `localhost`, `127.0.0.1`, or HTTPS.
 
 Open `Packages` to check the current Dockan version, preview dependency
 profiles, install host dependencies, prepare runtimes such as FrankenPHP or
-Node, and run release updates. For one-click system installs, run the panel as a
-root/system service or grant passwordless permission for Dockan package actions.
+Node, run Dockan release updates, and update Dockan Panel itself from GitHub.
+For one-click system installs and panel updates, run the panel as a root/system
+service or grant passwordless permission for Dockan package and update actions.
 When the panel is launched as a normal user, the `Packages` page marks system
 automation as disabled and keeps `Preview`/`Show Command` available.
 
@@ -333,6 +336,29 @@ SELinux labels when `restorecon` is available, and starts the service again.
 
 Use this only for repair or migration. A normal production install should keep
 all panel data in `dockan-panel-data` from the beginning.
+
+## Panel Updates
+
+The `Packages` page includes a `Panel GitHub Update` form. It downloads the
+selected GitHub ref from `Dockan-Conteneurisation-libre/Dockan-Panel`, updates
+the application files in the current panel directory, leaves `storage/`
+untouched, restores SELinux labels when available, and asks systemd to restart
+`dockan-dockan-panel.service`.
+
+For a production service running from `/srv/dockan-panel`, keep this environment
+variable in `dockan.yml`:
+
+```yaml
+env:
+  - PANEL_UPDATE_DIR=/srv/dockan-panel
+```
+
+Then open `Packages`, set `GitHub ref` to `main` or a release tag such as
+`v0.1.0`, then click `Run Panel Update`.
+
+The same command can be previewed from the panel with `Show Command`. One-click
+updates require the panel to run as the root/system service; otherwise run the
+shown command manually with `sudo`.
 
 ## Notes
 

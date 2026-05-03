@@ -9,6 +9,7 @@ services:
       - DOCKAN_BIN=dockan
       - PORT=9090
       - BIND=0.0.0.0
+      - PANEL_UPDATE_DIR=/srv/dockan-panel
     volumes:
       - dockan-panel-data:/app/storage
     command: frankenphp run --config Caddyfile

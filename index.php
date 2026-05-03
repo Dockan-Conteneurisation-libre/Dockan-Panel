@@ -18,6 +18,9 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
+const APP_VERSION = 'v0.1.0';
+const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
+const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
 const BACKUP_DIR = STORAGE_DIR . '/backups';
 const STACKS_DIR = STORAGE_DIR . '/stacks';
@@ -167,6 +170,8 @@ function handle_action(string $action, string $dockan): string
         'runtime-command' => runtime_command($dockan),
         'update-run' => update_run($dockan),
         'update-command' => update_command($dockan),
+        'panel-update-run' => panel_update_run(),
+        'panel-update-command' => panel_update_command(),
         'add-user' => add_user_action(),
         'delete-user' => delete_user_action(),
         'set-password' => set_password_action(),
@@ -588,6 +593,89 @@ function update_args(): array
     return $args;
 }
 
+function panel_update_run(): string
+{
+    return system_command_text(system_shell_run(panel_update_script()));
+}
+
+function panel_update_command(): string
+{
+    return system_shell_command(panel_update_script());
+}
+
+function panel_update_script(): string
+{
+    $ref = clean_github_ref((string) ($_POST['panel_ref'] ?? 'main'));
+    $repo = PANEL_REPO;
+    $appDir = panel_update_dir();
+    $service = PANEL_SERVICE;
+    $files = implode(' ', array_map('escapeshellarg', panel_update_files()));
+
+    return implode("\n", [
+        'set -eu',
+        'app_dir=' . escapeshellarg($appDir),
+        'repo=' . escapeshellarg($repo),
+        'ref=' . escapeshellarg($ref),
+        'service=' . escapeshellarg($service),
+        'tmp="$(mktemp -d)"',
+        'cleanup() { rm -rf "$tmp"; }',
+        'trap cleanup EXIT INT TERM',
+        'test -d "$app_dir"',
+        'curl -fsSL "https://codeload.github.com/${repo}/tar.gz/${ref}" -o "$tmp/panel.tar.gz"',
+        'tar -xzf "$tmp/panel.tar.gz" -C "$tmp"',
+        'src="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -n 1)"',
+        'test -n "$src"',
+        'for file in ' . $files . '; do',
+        '  if [ -f "$src/$file" ]; then',
+        '    mode=0644',
+        '    case "$file" in *.sh) mode=0755 ;; esac',
+        '    install -m "$mode" "$src/$file" "$app_dir/$file"',
+        '  fi',
+        'done',
+        'if command -v restorecon >/dev/null 2>&1; then restorecon -RF "$app_dir" 2>/dev/null || true; fi',
+        'if command -v systemctl >/dev/null 2>&1; then systemctl try-restart --no-block "$service" 2>/dev/null || true; fi',
+        'echo "Dockan Panel updated from GitHub ref ${ref}."',
+        'echo "Storage was not modified: ${app_dir}/storage"',
+    ]);
+}
+
+function panel_update_dir(): string
+{
+    $dir = trim((string) (getenv('PANEL_UPDATE_DIR') ?: ''));
+    if ($dir !== '') {
+        return $dir;
+    }
+    if (str_starts_with(__DIR__, '/var/lib/dockan/images/') && is_dir('/srv/dockan-panel')) {
+        return '/srv/dockan-panel';
+    }
+    return __DIR__;
+}
+
+function panel_update_files(): array
+{
+    return [
+        'index.php',
+        'README.md',
+        'Caddyfile',
+        'Dockanfile',
+        'dockan.yml',
+        'dockan-logo.svg',
+        'restore-prod-storage.sh',
+    ];
+}
+
+function clean_github_ref(string $ref): string
+{
+    $ref = trim($ref);
+    if ($ref === '') {
+        return 'main';
+    }
+    if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,79}$/', $ref) || str_contains($ref, '..') || str_starts_with($ref, '/') || str_ends_with($ref, '/')) {
+        throw new RuntimeException('Invalid GitHub ref.');
+    }
+    return $ref;
+}
+
 function clean_deps_profile(string $profile): string
 {
     if (!array_key_exists($profile, deps_profiles())) {
@@ -663,6 +751,22 @@ function system_dockan_run(string $dockan, array $args): array
     return sudo_dockan_run($dockan, $args);
 }
 
+function system_shell_command(string $script): string
+{
+    if (panel_is_root()) {
+        return shell_command(['sh', '-lc', $script]);
+    }
+    return 'sudo ' . shell_command(['sh', '-lc', $script]);
+}
+
+function system_shell_run(string $script): array
+{
+    if (panel_is_root()) {
+        return run_command(['sh', '-lc', $script]);
+    }
+    return run_command(['sudo', '-n', 'sh', '-lc', $script]);
+}
+
 function sudo_dockan_run(string $dockan, array $args): array
 {
     return run_command(array_merge(['sudo', '-n', 'env', 'PATH=' . sudo_path_value(), $dockan], $args));
@@ -679,7 +783,7 @@ function system_command_text(array $result): string
 {
     $text = trim((string) $result['stdout'] . "\n" . (string) $result['stderr']);
     if ((int) $result['code'] !== 0 && stripos($text, 'sudo:') !== false && preg_match('/password|mot de passe|terminal/i', $text)) {
-        throw new RuntimeException('System automation is disabled because Dockan Panel is not running with root privileges and sudo needs a password. Start the production panel as a root/system service, or grant passwordless permission for Dockan package actions.');
+        throw new RuntimeException('System automation is disabled because Dockan Panel is not running with root privileges and sudo needs a password. Start the production panel as a root/system service, or grant passwordless permission for Dockan package and update actions.');
     }
     return command_text($result) ?: 'Command completed.';
 }
@@ -1659,6 +1763,8 @@ function packages_content(string $dockan): string
     $frankenphp = command_output_or_empty(['frankenphp', 'version']) ?: 'Unavailable';
 
     $status = '<div class="table-wrap"><table><thead><tr><th>Item</th><th>Value</th></tr></thead><tbody>' .
+        '<tr><td>Panel version</td><td><pre>' . e(APP_NAME . ' ' . APP_VERSION) . '</pre></td></tr>' .
+        '<tr><td>Panel update dir</td><td class="path">' . e(panel_update_dir()) . '</td></tr>' .
         '<tr><td>Dockan binary</td><td class="path">' . e($dockanPath !== '' ? $dockanPath : $dockan) . '</td></tr>' .
         '<tr><td>Dockan version</td><td><pre>' . e($version) . '</pre></td></tr>' .
         '<tr><td>Panel user</td><td>' . e(panel_user_label()) . '</td></tr>' .
@@ -1707,11 +1813,19 @@ function packages_content(string $dockan): string
             'curl -fsSL https://raw.githubusercontent.com/Dockan-Conteneurisation-libre/Dockan/main/scripts/install.sh | sh',
         ])) . '</pre>';
 
+    $panelRef = (string) ($_POST['panel_ref'] ?? 'main');
+    $panelUpdateForm = '<form method="post" class="package-form">' . csrf_field() .
+        '<label>GitHub ref<input name="panel_ref" placeholder="main or v0.1.0" value="' . e($panelRef) . '"><span class="help">Use <code>main</code> for the newest repository state, or a release tag when one is published.</span></label>' .
+        '<div class="actions">' . action_submit('panel-update-run', 'Run Panel Update') . action_submit('panel-update-command', 'Show Command') . '</div>' .
+        '</form>' .
+        '<p class="help">Updates panel files from GitHub in <code>' . e(panel_update_dir()) . '</code>, keeps <code>storage/</code> untouched, and restarts <code>' . e(PANEL_SERVICE) . '</code> when systemd is available. Production one-click update needs the panel to run as root/system service.</p>';
+
     return section('Versions', $status) .
         section('Dependency Profiles', $profileForm) .
         section('Runtime Install', $runtimeForm) .
         section('Custom Packages', $customForm) .
-        section('Updates And Releases', $updateForm) .
+        section('Dockan CLI Updates', $updateForm) .
+        section('Panel GitHub Update', $panelUpdateForm) .
         section('Doctor', '<pre>' . e($doctor) . '</pre>');
 }
 
