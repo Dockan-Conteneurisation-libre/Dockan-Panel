@@ -1,7 +1,16 @@
 <?php
 declare(strict_types=1);
 
+ini_set('session.use_strict_mode', '1');
+session_set_cookie_params([
+    'lifetime' => 0,
+    'path' => '/',
+    'secure' => is_https_request(),
+    'httponly' => true,
+    'samesite' => 'Lax',
+]);
 session_start();
+security_headers();
 
 const APP_NAME = 'Dockan Panel';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -9,6 +18,7 @@ const BACKUP_DIR = STORAGE_DIR . '/backups';
 const STACKS_DIR = STORAGE_DIR . '/stacks';
 const TERMINALS_DIR = STORAGE_DIR . '/terminals';
 const AUTH_FILE = STORAGE_DIR . '/auth-users.json';
+const LOGIN_RATE_FILE = STORAGE_DIR . '/login-rate.json';
 
 ensure_storage();
 
@@ -24,6 +34,12 @@ $error = null;
 $view = $_GET['view'] ?? 'dashboard';
 
 if (isset($_POST['logout'])) {
+    try {
+        verify_csrf();
+    } catch (Throwable) {
+        http_response_code(400);
+        exit('Invalid session token.');
+    }
     $_SESSION = [];
     session_destroy();
     header('Location: ' . self_url());
@@ -658,16 +674,20 @@ function login_with_password(): void
     $username = clean_username((string) ($_POST['username'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
     $totp = trim((string) ($_POST['totp'] ?? ''));
+    check_login_rate($username);
     $user = find_user($username);
     if (!$user || !password_verify($password, (string) ($user['password_hash'] ?? ''))) {
+        record_login_failure($username);
         throw new RuntimeException('Invalid username or password.');
     }
     $secret = (string) ($user['totp_secret'] ?? '');
     if ($secret !== '') {
         if ($totp === '' || !totp_verify($secret, $totp)) {
+            record_login_failure($username);
             throw new RuntimeException('Invalid 2FA code.');
         }
     }
+    clear_login_failures($username);
     complete_login($username);
 }
 
@@ -861,6 +881,79 @@ function base32_decode(string $text): string
     return $output;
 }
 
+function login_rate_data(): array
+{
+    if (!is_file(LOGIN_RATE_FILE)) {
+        return [];
+    }
+    $data = json_decode((string) file_get_contents(LOGIN_RATE_FILE), true);
+    return is_array($data) ? $data : [];
+}
+
+function save_login_rate_data(array $data): void
+{
+    if (file_put_contents(LOGIN_RATE_FILE, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX) === false) {
+        throw new RuntimeException('Unable to save login rate data.');
+    }
+    @chmod(LOGIN_RATE_FILE, 0600);
+}
+
+function login_rate_key(string $username): string
+{
+    return hash('sha256', client_ip() . '|' . $username);
+}
+
+function check_login_rate(string $username): void
+{
+    $data = login_rate_data();
+    $key = login_rate_key($username);
+    $now = time();
+    $row = is_array($data[$key] ?? null) ? $data[$key] : [];
+    $first = (int) ($row['first_at'] ?? 0);
+    $count = (int) ($row['count'] ?? 0);
+    if ($first > 0 && $now - $first > 900) {
+        unset($data[$key]);
+        save_login_rate_data($data);
+        return;
+    }
+    if ($count >= 8) {
+        throw new RuntimeException('Too many login attempts. Try again in a few minutes.');
+    }
+}
+
+function record_login_failure(string $username): void
+{
+    $data = login_rate_data();
+    $key = login_rate_key($username);
+    $now = time();
+    $row = is_array($data[$key] ?? null) ? $data[$key] : [];
+    $first = (int) ($row['first_at'] ?? 0);
+    if ($first <= 0 || $now - $first > 900) {
+        $row = ['first_at' => $now, 'count' => 0];
+    }
+    $row['count'] = (int) ($row['count'] ?? 0) + 1;
+    $row['last_at'] = $now;
+    $data[$key] = $row;
+    foreach ($data as $itemKey => $item) {
+        if (!is_array($item) || $now - (int) ($item['first_at'] ?? 0) > 1800) {
+            unset($data[$itemKey]);
+        }
+    }
+    save_login_rate_data($data);
+}
+
+function clear_login_failures(string $username): void
+{
+    $data = login_rate_data();
+    unset($data[login_rate_key($username)]);
+    save_login_rate_data($data);
+}
+
+function client_ip(): string
+{
+    return (string) ($_SERVER['REMOTE_ADDR'] ?? 'local');
+}
+
 function handle_webauthn_api(): void
 {
     header('Content-Type: application/json; charset=utf-8');
@@ -923,7 +1016,7 @@ function webauthn_register_options(array $body): array
             ],
             'authenticatorSelection' => [
                 'residentKey' => 'preferred',
-                'userVerification' => 'preferred',
+                'userVerification' => 'required',
             ],
             'timeout' => 60000,
             'attestation' => 'none',
@@ -984,7 +1077,7 @@ function webauthn_login_options(array $body): array
                 'type' => 'public-key',
                 'id' => (string) ($key['id'] ?? ''),
             ], $keys),
-            'userVerification' => 'preferred',
+            'userVerification' => 'required',
             'timeout' => 60000,
         ],
     ];
@@ -1016,6 +1109,7 @@ function webauthn_login_verify(array $body): array
     if ($authenticatorData === '' || $clientDataJSON === '' || $signature === '') {
         throw new RuntimeException('Incomplete passkey response.');
     }
+    webauthn_validate_authenticator_data($authenticatorData, true);
     $signed = $authenticatorData . hash('sha256', $clientDataJSON, true);
     $valid = openssl_verify($signed, $signature, (string) ($match['public_key'] ?? ''), OPENSSL_ALGO_SHA256);
     if ($valid !== 1) {
@@ -1053,6 +1147,30 @@ function webauthn_validate_origin(string $origin): void
     if ($originHost === null || $originHost === false || $requestHost === '' || !hash_equals($requestHost, (string) $originHost)) {
         throw new RuntimeException('Invalid passkey origin.');
     }
+}
+
+function webauthn_validate_authenticator_data(string $authenticatorData, bool $requireUserVerification): void
+{
+    if (strlen($authenticatorData) < 37) {
+        throw new RuntimeException('Invalid passkey authenticator data.');
+    }
+    $rpIdHash = substr($authenticatorData, 0, 32);
+    $expectedRpIdHash = hash('sha256', webauthn_rp_id(), true);
+    if (!hash_equals($expectedRpIdHash, $rpIdHash)) {
+        throw new RuntimeException('Invalid passkey relying party.');
+    }
+    $flags = ord($authenticatorData[32]);
+    if (($flags & 0x01) !== 0x01) {
+        throw new RuntimeException('Passkey user presence was not confirmed.');
+    }
+    if ($requireUserVerification && ($flags & 0x04) !== 0x04) {
+        throw new RuntimeException('Passkey user verification is required.');
+    }
+}
+
+function webauthn_rp_id(): string
+{
+    return explode(':', (string) ($_SERVER['HTTP_HOST'] ?? ''))[0] ?: 'localhost';
 }
 
 function der_public_key_to_pem(string $der): string
@@ -1652,6 +1770,23 @@ function is_logged_in(): bool
 function self_url(): string
 {
     return strtok((string) ($_SERVER['REQUEST_URI'] ?? '/'), '?') ?: '/';
+}
+
+function is_https_request(): bool
+{
+    return (($_SERVER['HTTPS'] ?? '') !== '' && strtolower((string) $_SERVER['HTTPS']) !== 'off') ||
+        strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+}
+
+function security_headers(): void
+{
+    header('X-Frame-Options: DENY');
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: same-origin');
+    header("Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+    if (is_https_request()) {
+        header('Strict-Transport-Security: max-age=15552000; includeSubDomains');
+    }
 }
 
 function ensure_storage(): void
