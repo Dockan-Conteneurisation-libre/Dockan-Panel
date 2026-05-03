@@ -1588,7 +1588,7 @@ function verify_csrf(): void
 
 function login_content(?string $error): string
 {
-    return '<main class="auth">' . auth_header('Dockan Panel') . ($error ? '<div class="alert danger">' . e($error) . '</div>' : '') .
+    return '<main class="auth">' . auth_header('Login') . ($error ? '<div class="alert danger">' . e($error) . '</div>' : '') .
         '<form method="post"><input type="hidden" name="login" value="1"><label>Username<input name="username" value="admin" autofocus required></label><label>Password<input type="password" name="password" required></label><label>2FA code<input name="totp" inputmode="numeric" placeholder="optional"></label><button>Login</button></form>' .
         '<div class="passkey-panel login-passkey"><button type="button" data-passkey-login>Login with Passkey</button><span class="muted" data-passkey-status></span></div></main>';
 }
@@ -1601,7 +1601,7 @@ function setup_content(?string $error): string
 
 function auth_header(string $title): string
 {
-    return '<div class="auth-logo"><img src="?asset=logo" alt=""><h1>' . e($title) . '</h1></div>';
+    return '<div class="auth-logo"><img src="?asset=logo" alt=""><h1>Dockan Panel</h1><p>' . e($title) . '</p></div>';
 }
 
 function render_page(string $title, string $content, bool $with_nav, ?string $flash = null, ?string $error = null): void
@@ -2410,6 +2410,11 @@ th {
 }
 .auth-logo h1 {
   margin: 0;
+}
+.auth-logo p {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-weight: 800;
 }
 .auth form { display: grid; gap: 14px; }
 code {
