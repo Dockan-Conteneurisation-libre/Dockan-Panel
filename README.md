@@ -51,6 +51,24 @@ must call the host `dockan` CLI and manage the host Dockan containers.
 Users, passkeys, stacks, and backups are stored in the persistent
 `dockan-panel-data` volume.
 
+The important files inside the panel are:
+
+```text
+/app/storage/auth-users.json
+/app/storage/stacks/
+/app/storage/backups/
+```
+
+On a normal user install, Dockan keeps the persistent volume on the host under:
+
+```text
+~/.local/share/dockan/volumes/dockan-panel-data
+```
+
+Do not remove this volume unless you want to reset the panel. Removing it
+removes admin users, password hashes, 2FA secrets, passkeys, stacks, and panel
+backups.
+
 On the Stacks page, fill `Required images` and `Registry folder`, then click
 `Import Required Images`. This runs `dockan pull <image> <registry-folder>` for
 each image. If the registry folder is empty, Dockan uses its default local
@@ -75,6 +93,47 @@ Create the first admin account on the setup page.
 
 If `dockan` is installed in `~/.local/bin`, the panel adds that directory to
 `PATH` automatically.
+
+## Persistent Storage
+
+Dockan Panel keeps its data in `storage/` when it runs directly with PHP.
+
+When it runs as a Dockan app, `storage/` is mounted from the
+`dockan-panel-data` volume:
+
+```yaml
+volumes:
+  - dockan-panel-data:/app/storage
+```
+
+The auth database is a local JSON file:
+
+```text
+storage/auth-users.json
+```
+
+It stores password hashes, not plain passwords. It also stores TOTP secrets and
+passkey public keys. Treat this file like a secret and back it up safely.
+
+## Backup And Restore
+
+Backup the whole panel state:
+
+```bash
+dockan volume backup dockan-panel-data dockan-panel-backup.tar.gz
+```
+
+Restore it into a fresh volume:
+
+```bash
+dockan volume restore dockan-panel-data dockan-panel-backup.tar.gz
+```
+
+After restoring, redeploy the panel:
+
+```bash
+dockan compose redeploy
+```
 
 ## Notes
 
