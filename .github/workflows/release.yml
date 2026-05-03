@@ -18,11 +18,12 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -eu
-          git init repo
+          git init --initial-branch=main repo
           cd repo
-          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --tags --force origin
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --tags --force origin
           git checkout --detach "${GITHUB_REF_NAME}"
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Verify panel version
         working-directory: repo
