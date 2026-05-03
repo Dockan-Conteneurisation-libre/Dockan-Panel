@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.1';
+const APP_VERSION = 'v0.1.2';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -28,6 +28,7 @@ const TERMINALS_DIR = STORAGE_DIR . '/terminals';
 const STORE_ROOT = STORAGE_DIR . '/store';
 const STORE_DIR = STORE_ROOT . '/Dockan-Store';
 const STORE_RELEASE_URL = 'https://github.com/Dockan-Conteneurisation-libre/Dockan-store/releases/latest/download/dockan-store.tar.gz';
+const STORE_FALLBACK_URL = 'https://github.com/Dockan-Conteneurisation-libre/Dockan-store/archive/refs/heads/main.tar.gz';
 const AUTH_FILE = STORAGE_DIR . '/auth-users.json';
 const LOGIN_RATE_FILE = STORAGE_DIR . '/login-rate.json';
 
@@ -684,15 +685,30 @@ function store_update_script(): string
         'set -eu',
         'base=' . escapeshellarg(STORE_ROOT),
         'url=' . escapeshellarg(STORE_RELEASE_URL),
+        'fallback_url=' . escapeshellarg(STORE_FALLBACK_URL),
         'tmp="$(mktemp -d)"',
         'cleanup() { rm -rf "$tmp"; }',
         'trap cleanup EXIT INT TERM',
         'mkdir -p "$base"',
-        'curl -fsSL "$url" -o "$tmp/dockan-store.tar.gz"',
+        'source="release"',
+        'if ! curl -fsSL "$url" -o "$tmp/dockan-store.tar.gz"; then',
+        '  echo "Latest release archive not ready, downloading Store from main branch..."',
+        '  curl -fsSL "$fallback_url" -o "$tmp/dockan-store.tar.gz"',
+        '  source="main"',
+        'fi',
+        'mkdir -p "$tmp/extract"',
+        'tar -xzf "$tmp/dockan-store.tar.gz" -C "$tmp/extract"',
+        'src="$(find "$tmp/extract" -mindepth 1 -maxdepth 1 -type d | head -n 1)"',
+        'test -n "$src"',
+        'test -x "$src/dockan-store"',
         'rm -rf "$base/Dockan-Store"',
-        'tar -xzf "$tmp/dockan-store.tar.gz" -C "$base"',
+        'mkdir -p "$base/Dockan-Store"',
+        'cp -a "$src/." "$base/Dockan-Store/"',
         'test -x "$base/Dockan-Store/dockan-store"',
-        'echo "Dockan Store installed in $base/Dockan-Store"',
+        'echo "Dockan Store installed from $source in $base/Dockan-Store"',
+        'if [ "$source" = "main" ]; then',
+        '  echo "Note: app image packs are available after the Store release workflow finishes."',
+        'fi',
     ]);
 }
 
