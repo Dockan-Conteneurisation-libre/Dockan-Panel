@@ -305,3 +305,4 @@ public access through HTTPS. If the reverse proxy runs on the same machine, use
 Passkeys are verified server-side with the browser challenge and signature. They
 are still browser-dependent: if your browser cannot expose the WebAuthn public
 key during registration, use password plus 2FA instead.
+# Dockan-Panel
