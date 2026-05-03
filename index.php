@@ -27,6 +27,7 @@ const STACKS_DIR = STORAGE_DIR . '/stacks';
 const TERMINALS_DIR = STORAGE_DIR . '/terminals';
 const STORE_ROOT = STORAGE_DIR . '/store';
 const STORE_DIR = STORE_ROOT . '/Dockan-Store';
+const STORE_APPS_DIR = STORE_DIR . '/apps';
 const STORE_RELEASE_URL = 'https://github.com/Dockan-Conteneurisation-libre/Dockan-store/releases/latest/download/dockan-store.tar.gz';
 const STORE_FALLBACK_URL = 'https://github.com/Dockan-Conteneurisation-libre/Dockan-store/archive/refs/heads/main.tar.gz';
 const AUTH_FILE = STORAGE_DIR . '/auth-users.json';
@@ -123,20 +124,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
-$content = match ($view) {
-    'containers' => containers_content($dockan),
-    'store' => store_content($dockan),
-    'container' => container_content($dockan),
-    'images' => images_content($dockan),
-    'volumes' => volumes_content($dockan),
-    'networks' => networks_content($dockan),
-    'stacks' => stacks_content($dockan),
-    'compose' => compose_content($dockan),
-    'logs' => logs_content($dockan),
-    'packages' => packages_content($dockan),
-    'security' => security_content(),
-    default => dashboard_content($dockan),
-};
+try {
+    $content = match ($view) {
+        'containers' => containers_content($dockan),
+        'store' => store_content($dockan),
+        'container' => container_content($dockan),
+        'images' => images_content($dockan),
+        'volumes' => volumes_content($dockan),
+        'networks' => networks_content($dockan),
+        'stacks' => stacks_content($dockan),
+        'compose' => compose_content($dockan),
+        'logs' => logs_content($dockan),
+        'packages' => packages_content($dockan),
+        'security' => security_content(),
+        default => dashboard_content($dockan),
+    };
+} catch (Throwable $e) {
+    http_response_code(500);
+    $error = 'Unable to render this view: ' . $e->getMessage();
+    $content = section('Application Error', '<p class="muted">The panel could not render this page. Check the message above and the service logs for details.</p>');
+}
 
 render_page(page_title($view), $content, true, $flash, $error);
 
@@ -732,12 +739,12 @@ function store_app_install(string $dockan, bool $deploy): string
     $app = clean_store_app(required_post('app'));
     $target = clean_store_target(required_post('target'));
     $store = STORE_DIR;
-    if (!is_file($store . '/dockan-store')) {
-        throw new RuntimeException('Dockan Store is not installed yet. Click Install / Update Store first.');
-    }
     $script = implode("\n", [
         'set -eu',
+        store_update_script(),
         'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
+        'test -x ' . escapeshellarg($store . '/dockan-store'),
+        'test -d ' . escapeshellarg($store . '/apps/' . $app),
         'if [ -f ' . escapeshellarg($target . '/dockan.yml') . ' ]; then',
         '  echo "App target already exists, skipping template install."',
         'else',
@@ -769,16 +776,16 @@ function store_app_update(string $dockan, bool $redeploy): string
     $app = clean_store_app(required_post('app'));
     $target = clean_store_target(required_post('target'));
     $store = STORE_DIR;
-    if (!is_file($store . '/dockan-store')) {
-        throw new RuntimeException('Dockan Store is not installed yet. Click Install / Update Store first.');
-    }
     if (!is_dir($target)) {
         throw new RuntimeException('App folder does not exist yet. Use Install first.');
     }
     $script = implode("\n", [
         'set -eu',
-        'cd ' . escapeshellarg($store),
+        store_update_script(),
         'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
+        'test -x ' . escapeshellarg($store . '/dockan-store'),
+        'test -d ' . escapeshellarg($store . '/apps/' . $app),
+        'cd ' . escapeshellarg($store),
         './dockan-store images ' . escapeshellarg($app),
         'cp -a ' . escapeshellarg($store . '/apps/' . $app . '/.') . ' ' . escapeshellarg($target . '/'),
         $redeploy ? store_dockan_command($dockan, ['compose', 'redeploy', '-f', $target . '/dockan.yml']) : 'true',
@@ -792,14 +799,14 @@ function store_app_autostart(string $dockan, bool $install): string
     $app = clean_store_app(required_post('app'));
     $target = clean_store_target(required_post('target'));
     $store = STORE_DIR;
-    if ($install && !is_file($store . '/dockan-store')) {
-        throw new RuntimeException('Dockan Store is not installed yet. Click Install / Update Store first.');
-    }
     $lines = [
         'set -eu',
         'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
     ];
     if ($install) {
+        $lines[] = store_update_script();
+        $lines[] = 'test -x ' . escapeshellarg($store . '/dockan-store');
+        $lines[] = 'test -d ' . escapeshellarg($store . '/apps/' . $app);
         $lines[] = 'if [ -f ' . escapeshellarg($target . '/dockan.yml') . ' ]; then';
         $lines[] = '  echo "App target already exists, skipping template install."';
         $lines[] = 'else';
@@ -1078,10 +1085,15 @@ function parse_command_values(string $text): array
 
 function clean_resource_name(string $name, string $label): string
 {
-    if (!preg_match('/^[A-Za-z0-9_.-]{1,96}$/', $name)) {
+    if (!is_resource_name($name)) {
         throw new RuntimeException('Invalid ' . $label . '.');
     }
     return $name;
+}
+
+function is_resource_name(string $name): bool
+{
+    return (bool) preg_match('/^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/', $name);
 }
 
 function run_dockan(string $dockan, array $args): array
@@ -1834,7 +1846,7 @@ function containers_content(string $dockan): string
         $body .= '<td>' . e($row['PID'] ?? '') . '</td>';
         $body .= '<td>' . e($row['IMAGE'] ?? '') . '</td>';
         $body .= '<td>' . e($row['PORTS'] ?? '') . '</td>';
-        $body .= '<td class="actions">' . container_action_buttons($name, $status) . '</td>';
+        $body .= '<td class="actions">' . (is_resource_name($name) ? container_action_buttons($name, $status) : '<span class="muted">Invalid name</span>') . '</td>';
         $body .= '</tr>';
     }
     if (!$rows) {
@@ -2420,8 +2432,16 @@ function logs_content(string $dockan): string
     $name = trim((string) ($_GET['name'] ?? $_POST['name'] ?? ''));
     $logs = '';
     if ($name !== '') {
-        $result = run_dockan($dockan, ['logs', $name]);
-        $logs = trim((string) $result['stdout'] . "\n" . (string) $result['stderr']);
+        if (!is_resource_name($name)) {
+            $logs = 'Invalid container name: ' . $name;
+        } else {
+            try {
+                $result = run_dockan($dockan, ['logs', $name]);
+                $logs = trim((string) $result['stdout'] . "\n" . (string) $result['stderr']);
+            } catch (Throwable $e) {
+                $logs = $e->getMessage();
+            }
+        }
     }
     $form = '<form method="get" class="inline-form"><input type="hidden" name="view" value="logs"><input name="name" placeholder="container-name" value="' . e($name) . '" required><button>Show Logs</button></form>';
     return section('Logs', $form . '<pre>' . e($logs) . '</pre>');
@@ -2452,6 +2472,9 @@ function parse_table(string $text): array
         return [];
     }
     $headers = preg_split('/\s{2,}/', trim($lines[0])) ?: [];
+    if ($headers === ['NAME', 'STATUS', 'PID', 'IMAGE', 'PORTS']) {
+        return parse_container_table($lines);
+    }
     $rows = [];
     for ($i = 1; $i < count($lines); $i++) {
         $parts = preg_split('/\s{2,}/', trim($lines[$i]), count($headers)) ?: [];
@@ -2463,6 +2486,28 @@ function parse_table(string $text): array
             $row[$header] = $parts[$index] ?? '';
         }
         $rows[] = $row;
+    }
+    return $rows;
+}
+
+function parse_container_table(array $lines): array
+{
+    $rows = [];
+    for ($i = 1; $i < count($lines); $i++) {
+        $line = trim($lines[$i]);
+        if ($line === '') {
+            continue;
+        }
+        if (!preg_match('/^(.+?)\s+(running|exited|stopped|created|restarting|paused)\s+(\d+)\s+(\S+)(?:\s+(.*))?$/', $line, $matches)) {
+            continue;
+        }
+        $rows[] = [
+            'NAME' => $matches[1],
+            'STATUS' => $matches[2],
+            'PID' => $matches[3],
+            'IMAGE' => $matches[4],
+            'PORTS' => $matches[5] ?? '',
+        ];
     }
     return $rows;
 }
