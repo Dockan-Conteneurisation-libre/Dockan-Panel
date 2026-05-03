@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.10';
+const APP_VERSION = 'v0.1.11';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -150,9 +150,9 @@ render_page(page_title($view), $content, true, $flash, $error);
 function handle_action(string $action, string $dockan): string
 {
     return match ($action) {
-        'stop-container' => command_text(run_dockan($dockan, ['stop', required_post('name')])),
-        'remove-container' => command_text(run_dockan($dockan, ['rm', required_post('name')])),
-        'health-container' => command_text(run_dockan($dockan, ['health', required_post('name')])),
+        'stop-container' => container_command_text($dockan, ['stop', required_post('name')]),
+        'remove-container' => container_command_text($dockan, ['rm', required_post('name')]),
+        'health-container' => container_command_text($dockan, ['health', required_post('name')]),
         'start-container-app' => container_compose_action($dockan, 'up'),
         'restart-container-app' => container_compose_action($dockan, 'redeploy'),
         'exec-container' => exec_container_command($dockan),
@@ -290,7 +290,7 @@ function exec_container_command(string $dockan): string
     if (strlen($command) > 8000) {
         throw new RuntimeException('Command is too large.');
     }
-    return command_text(run_dockan($dockan, ['exec', $name, 'sh', '-lc', $command]));
+    return command_text(run_dockan_for_store($dockan, clean_container_store((string) ($_POST['store'] ?? '')), ['exec', $name, 'sh', '-lc', $command]));
 }
 
 function handle_terminal_api(string $dockan): void
@@ -1187,6 +1187,34 @@ function run_dockan(string $dockan, array $args): array
     return run_command($cmd);
 }
 
+function run_dockan_for_store(string $dockan, string $store, array $args): array
+{
+    $home = dockan_store_home($store);
+    if ($home === null) {
+        return run_dockan($dockan, $args);
+    }
+    return run_command(array_merge(['env', 'DOCKAN_HOME=' . $home, $dockan], $args));
+}
+
+function dockan_store_home(string $store): ?string
+{
+    return match ($store) {
+        'system' => '/var/lib/dockan',
+        'user' => user_dockan_home(),
+        default => null,
+    };
+}
+
+function user_dockan_home(): string
+{
+    $dataHome = getenv('XDG_DATA_HOME') ?: '';
+    if ($dataHome !== '') {
+        return rtrim($dataHome, '/') . '/dockan';
+    }
+    $home = getenv('HOME') ?: '/tmp';
+    return rtrim($home, '/') . '/.local/share/dockan';
+}
+
 function run_command(array $cmd): array
 {
     $command = shell_command($cmd);
@@ -1903,7 +1931,7 @@ function json_response(array $payload): void
 
 function dashboard_content(string $dockan): string
 {
-    $containers = parse_table(command_or_empty($dockan, ['ps', '-a']));
+    $containers = dockan_container_rows($dockan);
     $images = parse_table(command_or_empty($dockan, ['images']));
     $volumes = parse_table(command_or_empty($dockan, ['volume', 'ls']));
     $networks = parse_table(command_or_empty($dockan, ['network', 'ls']));
@@ -1920,22 +1948,27 @@ function dashboard_content(string $dockan): string
 
 function containers_content(string $dockan): string
 {
-    $rows = parse_table(command_or_empty($dockan, ['ps', '-a']));
-    $body = '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Status</th><th>PID</th><th>Image</th><th>Ports</th><th>Actions</th></tr></thead><tbody>';
+    $rows = dockan_container_rows($dockan);
+    $hasStore = container_rows_have_store($rows);
+    $body = '<div class="table-wrap"><table><thead><tr>' . ($hasStore ? '<th>Store</th>' : '') . '<th>Name</th><th>Status</th><th>PID</th><th>Image</th><th>Ports</th><th>Actions</th></tr></thead><tbody>';
     foreach ($rows as $row) {
         $name = $row['NAME'] ?? '';
+        $store = (string) ($row['STORE'] ?? '');
         $status = strtolower($row['STATUS'] ?? '');
         $body .= '<tr>';
-        $body .= '<td><a href="?view=container&name=' . rawurlencode($name) . '">' . e($name) . '</a></td>';
+        if ($hasStore) {
+            $body .= '<td>' . e($store !== '' ? $store : 'current') . '</td>';
+        }
+        $body .= '<td><a href="?view=container&name=' . rawurlencode($name) . ($store !== '' ? '&store=' . rawurlencode($store) : '') . '">' . e($name) . '</a></td>';
         $body .= '<td>' . status_badge($status) . '</td>';
         $body .= '<td>' . e($row['PID'] ?? '') . '</td>';
         $body .= '<td>' . e($row['IMAGE'] ?? '') . '</td>';
         $body .= '<td>' . e($row['PORTS'] ?? '') . '</td>';
-        $body .= '<td class="actions">' . (is_resource_name($name) ? container_action_buttons($name, $status) : '<span class="muted">Invalid name</span>') . '</td>';
+        $body .= '<td class="actions">' . (is_resource_name($name) ? container_action_buttons($name, $status, $store) : '<span class="muted">Invalid name</span>') . '</td>';
         $body .= '</tr>';
     }
     if (!$rows) {
-        $body .= '<tr><td colspan="6" class="muted">No containers.</td></tr>';
+        $body .= '<tr><td colspan="' . ($hasStore ? '7' : '6') . '" class="muted">No containers.</td></tr>';
     }
     $body .= '</tbody></table></div>';
     return section('Containers', $body) .
@@ -1997,15 +2030,17 @@ function installed_store_apps_content(array $containerRows): string
 function container_content(string $dockan): string
 {
     $name = trim((string) ($_GET['name'] ?? $_POST['name'] ?? ''));
+    $store = clean_container_store((string) ($_GET['store'] ?? $_POST['store'] ?? ''));
     if ($name === '') {
         return section('Container', '<p class="muted">No container selected.</p>');
     }
 
-    $containers = parse_table(command_or_empty($dockan, ['ps', '-a']));
+    $containers = dockan_container_rows($dockan);
     $current = null;
     foreach ($containers as $row) {
-        if (($row['NAME'] ?? '') === $name) {
+        if (($row['NAME'] ?? '') === $name && ($store === '' || ($row['STORE'] ?? '') === $store)) {
             $current = $row;
+            $store = (string) ($row['STORE'] ?? $store);
             break;
         }
     }
@@ -2020,10 +2055,11 @@ function container_content(string $dockan): string
             'Image' => $current['IMAGE'] ?? '-',
             'Ports' => $current['PORTS'] ?? '-',
             'Status' => $current['STATUS'] ?? '-',
+            'Store' => $store !== '' ? $store : 'current',
         ]) .
         '<div class="actions detail-actions">' .
-        container_action_buttons($name, $status) .
-        '<a class="button-link" href="?view=logs&name=' . rawurlencode($name) . '">Logs page</a>' .
+        container_action_buttons($name, $status, $store) .
+        '<a class="button-link" href="?view=logs&name=' . rawurlencode($name) . ($store !== '' ? '&store=' . rawurlencode($store) : '') . '">Logs page</a>' .
         '<a class="button-link" href="?view=containers">Back</a>' .
         '</div>';
 
@@ -2042,12 +2078,13 @@ function container_content(string $dockan): string
     $quickExec = '<form method="post" class="terminal-form">' . csrf_field() .
         '<input type="hidden" name="action" value="exec-container">' .
         '<input type="hidden" name="name" value="' . e($name) . '">' .
+        '<input type="hidden" name="store" value="' . e($store) . '">' .
         '<label>Quick command<textarea name="command" class="small-editor" spellcheck="false" required>' . e($command) . '</textarea><span class="help">One-shot fallback through <code>dockan exec ' . e($name) . ' sh -lc "..."</code>.</span></label>' .
         '<button>Run Command</button>' .
         '</form>';
 
-    $inspect = command_or_empty($dockan, ['inspect', $name]);
-    $logs = command_or_empty($dockan, ['logs', $name]);
+    $inspect = container_command_or_empty($dockan, ['inspect', $name], $store);
+    $logs = container_command_or_empty($dockan, ['logs', $name], $store);
 
     return section('Container', $summary) .
         section('Live Terminal', $liveTerminal) .
@@ -2056,7 +2093,7 @@ function container_content(string $dockan): string
         section('Logs', '<pre>' . e($logs) . '</pre>');
 }
 
-function container_action_buttons(string $name, string $status): string
+function container_action_buttons(string $name, string $status, string $store = ''): string
 {
     $html = '';
     $composeFile = container_compose_file($name);
@@ -2067,11 +2104,12 @@ function container_action_buttons(string $name, string $status): string
             $html .= post_button('restart-container-app', ['name' => $name, 'file' => $composeFile], 'Restart App');
         }
     }
-    $html .= post_button('health-container', ['name' => $name], 'Health');
+    $fields = ['name' => $name, 'store' => $store];
+    $html .= post_button('health-container', $fields, 'Health');
     if ($status === 'running') {
-        $html .= post_button('stop-container', ['name' => $name], 'Stop');
+        $html .= post_button('stop-container', $fields, 'Stop');
     }
-    $html .= post_button('remove-container', ['name' => $name], 'Remove', 'danger');
+    $html .= post_button('remove-container', $fields, 'Remove', 'danger');
     return $html;
 }
 
@@ -2640,21 +2678,61 @@ function stacks_content(string $dockan): string
 function logs_content(string $dockan): string
 {
     $name = trim((string) ($_GET['name'] ?? $_POST['name'] ?? ''));
+    $store = clean_container_store((string) ($_GET['store'] ?? $_POST['store'] ?? ''));
     $logs = '';
     if ($name !== '') {
         if (!is_resource_name($name)) {
             $logs = 'Invalid container name: ' . $name;
         } else {
             try {
-                $result = run_dockan($dockan, ['logs', $name]);
+                $result = run_dockan_for_store($dockan, $store, ['logs', $name]);
                 $logs = trim((string) $result['stdout'] . "\n" . (string) $result['stderr']);
             } catch (Throwable $e) {
                 $logs = $e->getMessage();
             }
         }
     }
-    $form = '<form method="get" class="inline-form"><input type="hidden" name="view" value="logs"><input name="name" placeholder="container-name" value="' . e($name) . '" required><button>Show Logs</button></form>';
+    $form = '<form method="get" class="inline-form"><input type="hidden" name="view" value="logs"><input type="hidden" name="store" value="' . e($store) . '"><input name="name" placeholder="container-name" value="' . e($name) . '" required><button>Show Logs</button></form>';
     return section('Logs', $form . '<pre>' . e($logs) . '</pre>');
+}
+
+function dockan_container_rows(string $dockan): array
+{
+    $scoped = command_or_empty($dockan, ['ps', '-a', '--scope', 'all']);
+    if ($scoped !== '') {
+        return parse_table($scoped);
+    }
+    return parse_table(command_or_empty($dockan, ['ps', '-a']));
+}
+
+function container_rows_have_store(array $rows): bool
+{
+    foreach ($rows as $row) {
+        if (($row['STORE'] ?? '') !== '') {
+            return true;
+        }
+    }
+    return false;
+}
+
+function clean_container_store(string $store): string
+{
+    $store = trim($store);
+    return in_array($store, ['current', 'system', 'user'], true) ? $store : '';
+}
+
+function container_command_text(string $dockan, array $args): string
+{
+    return command_text(run_dockan_for_store($dockan, clean_container_store((string) ($_POST['store'] ?? '')), $args));
+}
+
+function container_command_or_empty(string $dockan, array $args, string $store): string
+{
+    try {
+        return command_text(run_dockan_for_store($dockan, $store, $args));
+    } catch (Throwable) {
+        return '';
+    }
 }
 
 function command_or_empty(string $dockan, array $args): string

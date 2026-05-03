@@ -18,11 +18,12 @@
 This project is separate from the Dockan CLI repository. It is meant to live in
 its own repository and call the local `dockan` command installed on the machine.
 
-Current panel version: `v0.1.9`.
+Current panel version: `v0.1.11`.
 
 It can:
 
 - list containers, images, volumes, and networks
+- show Dockan CLI `ps --scope all` results when available, so user and system stores appear in the same Containers view
 - show logs
 - run healthchecks
 - stop and remove containers
@@ -121,6 +122,8 @@ the latest template before optionally running `dockan compose redeploy`.
 
 This compose file uses `isolation: none` because the panel is an admin UI: it
 must call the host `dockan` CLI and manage the host Dockan containers.
+Dockan CLI `v0.1.14` or newer is recommended so the panel can distinguish
+`current`, `system`, and `user` container stores.
 
 Users, passkeys, stacks, and backups are stored in the persistent
 `dockan-panel-data` volume.
