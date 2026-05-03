@@ -18,7 +18,7 @@
 This project is separate from the Dockan CLI repository. It is meant to live in
 its own repository and call the local `dockan` command installed on the machine.
 
-Current panel version: `v0.1.5`.
+Current panel version: `v0.1.6`.
 
 It can:
 
@@ -378,12 +378,12 @@ tag.
 Before tagging a new release, bump the version displayed by the panel:
 
 ```bash
-./scripts/bump-version.sh v0.1.5
+./scripts/bump-version.sh v0.1.6
 git add index.php README.md
-git commit -m "Release Dockan Panel v0.1.5"
-git tag -a v0.1.5 -m "Dockan Panel v0.1.5"
+git commit -m "Release Dockan Panel v0.1.6"
+git tag -a v0.1.6 -m "Dockan Panel v0.1.6"
 git push
-git push origin v0.1.5
+git push origin v0.1.6
 ```
 
 The pushed tag triggers `.github/workflows/release.yml`. The workflow verifies

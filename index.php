@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.5';
+const APP_VERSION = 'v0.1.6';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -182,6 +182,8 @@ function handle_action(string $action, string $dockan): string
         'store-app-deploy' => store_app_install($dockan, true),
         'store-app-install-autostart' => store_app_autostart($dockan, true),
         'store-app-autostart' => store_app_autostart($dockan, false),
+        'store-app-disable-autostart' => store_app_disable_autostart($dockan),
+        'store-app-launch' => store_app_launch($dockan),
         'store-app-update' => store_app_update($dockan, false),
         'store-app-redeploy' => store_app_update($dockan, true),
         'add-user' => add_user_action(),
@@ -724,13 +726,31 @@ function store_app_install(string $dockan, bool $deploy): string
     }
     $script = implode("\n", [
         'set -eu',
-        'cd ' . escapeshellarg($store),
         'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
-        './dockan-store install ' . escapeshellarg($app) . ' ' . escapeshellarg($target),
+        'if [ -f ' . escapeshellarg($target . '/dockan.yml') . ' ]; then',
+        '  echo "App target already exists, skipping template install."',
+        'else',
+        '  cd ' . escapeshellarg($store),
+        '  ./dockan-store install ' . escapeshellarg($app) . ' ' . escapeshellarg($target),
+        'fi',
         $deploy ? shell_command([$dockan, 'compose', 'up', '-f', $target . '/dockan.yml']) : 'true',
         shell_command(['printf', "Store app ready: %s -> %s\n", $app, $target]),
     ]);
     return command_text(run_command(['sh', '-lc', $script]));
+}
+
+function store_app_launch(string $dockan): string
+{
+    $app = clean_store_app(required_post('app'));
+    $target = clean_store_target(required_post('target'));
+    $lines = [
+        'set -eu',
+        'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
+        'test -f ' . escapeshellarg($target . '/dockan.yml'),
+        shell_command([$dockan, 'compose', 'up', '-f', $target . '/dockan.yml']),
+        shell_command(['printf', "Store app launched: %s -> %s\n", $app, $target]),
+    ];
+    return system_command_text(system_shell_run(implode("\n", $lines)));
 }
 
 function store_app_update(string $dockan, bool $redeploy): string
@@ -784,6 +804,26 @@ function store_app_autostart(string $dockan, bool $install): string
     $lines[] = '  ' . shell_command(['systemctl', 'enable', '--now', 'dockan-' . $app . '.service']);
     $lines[] = 'fi';
     $lines[] = shell_command(['printf', "Store app autostart enabled: %s -> %s\n", $app, $target]);
+    return system_command_text(system_shell_run(implode("\n", $lines)));
+}
+
+function store_app_disable_autostart(string $dockan): string
+{
+    $app = clean_store_app(required_post('app'));
+    $target = clean_store_target(required_post('target'));
+    $service = 'dockan-' . $app . '.service';
+    $lines = [
+        'set -eu',
+        'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
+        'test -f ' . escapeshellarg($target . '/dockan.yml'),
+        'if ! ' . shell_command([$dockan, 'compose', 'no-autostart', '-f', $target . '/dockan.yml', '--name', $app]) . '; then',
+        '  echo "Native compose no-autostart unavailable, falling back to systemctl."',
+        '  systemctl disable --now ' . escapeshellarg($service) . ' 2>/dev/null || true',
+        '  ' . shell_command([$dockan, 'service', 'uninstall', '-f', $target . '/dockan.yml', '--name', $app]) . ' 2>/dev/null || true',
+        '  systemctl daemon-reload',
+        'fi',
+        shell_command(['printf', "Store app autostart disabled: %s -> %s\n", $app, $target]),
+    ];
     return system_command_text(system_shell_run(implode("\n", $lines)));
 }
 
@@ -1963,7 +2003,7 @@ function store_app_card(array $app, bool $storeInstalled): string
     $port = (string) ($app['default_port'] ?? '');
     $requires = is_array($app['requires'] ?? null) ? array_values(array_filter(array_map('strval', $app['requires']))) : [];
     $target = store_default_target($id);
-    $installed = is_dir($target);
+    $installed = is_file($target . '/dockan.yml');
     $autostart = store_app_service_enabled($id);
     $initials = store_initials($name);
     $logo = store_app_logo($app);
@@ -1975,20 +2015,29 @@ function store_app_card(array $app, bool $storeInstalled): string
         $imageTags = '<span class="muted">No image list.</span>';
     }
 
+    $actions = '';
+    if ($installed) {
+        $actions .= '<button name="action" value="store-app-launch">Launch</button>';
+        $actions .= '<button name="action" value="store-app-update"' . ($storeInstalled ? '' : ' disabled') . '>Update Files</button>';
+        $actions .= '<button name="action" value="store-app-redeploy"' . ($storeInstalled ? '' : ' disabled') . '>Update + Redeploy</button>';
+        if ($autostart) {
+            $actions .= '<button name="action" value="store-app-disable-autostart">Disable Auto-start</button>';
+        } else {
+            $actions .= '<button name="action" value="store-app-autostart">Enable Auto-start</button>';
+        }
+    } else {
+        $actions .= '<button name="action" value="store-app-install"' . ($storeInstalled ? '' : ' disabled') . '>Install Files</button>';
+        $actions .= '<button name="action" value="store-app-deploy"' . ($storeInstalled ? '' : ' disabled') . '>Install + Launch</button>';
+        $actions .= '<button name="action" value="store-app-install-autostart"' . ($storeInstalled ? '' : ' disabled') . '>Install + Auto-start</button>';
+    }
+
     $form = '<form method="post" class="store-card-form">' . csrf_field() .
         '<input type="hidden" name="app" value="' . e($id) . '">' .
         '<label>Install folder<input name="target" value="' . e($target) . '" required></label>' .
-        '<div class="actions">' .
-        '<button name="action" value="store-app-install"' . ($storeInstalled ? '' : ' disabled') . '>Install</button>' .
-        '<button name="action" value="store-app-deploy"' . ($storeInstalled ? '' : ' disabled') . '>Install + Launch</button>' .
-        '<button name="action" value="store-app-install-autostart"' . ($storeInstalled ? '' : ' disabled') . '>Install + Auto-start</button>' .
-        '<button name="action" value="store-app-update"' . ($storeInstalled && $installed ? '' : ' disabled') . '>Update</button>' .
-        '<button name="action" value="store-app-redeploy"' . ($storeInstalled && $installed ? '' : ' disabled') . '>Update + Redeploy</button>' .
-        '<button name="action" value="store-app-autostart"' . ($installed ? '' : ' disabled') . '>Enable Auto-start</button>' .
-        '</div></form>';
+        '<div class="actions store-actions">' . $actions . '</div></form>';
 
     return '<article class="store-card">' .
-        '<div class="store-card-head"><div class="store-logo">' . ($logo !== '' ? '<img src="' . e($logo) . '" alt="" loading="lazy">' : e($initials)) . '</div><div><h3>' . e($name) . '</h3><div class="badge-row"><span class="badge ok">' . e($category) . '</span>' . ($port !== '' ? '<span class="badge">:' . e($port) . '</span>' : '') . ($installed ? '<span class="badge warn">installed</span>' : '') . ($autostart ? '<span class="badge ok">auto-start</span>' : '') . '</div></div></div>' .
+        '<div class="store-card-head"><div class="store-logo">' . ($logo !== '' ? '<img src="' . e($logo) . '" alt="" loading="lazy">' : e($initials)) . '</div><div><h3>' . e($name) . '</h3><div class="badge-row"><span class="badge ok">' . e($category) . '</span>' . ($port !== '' ? '<span class="badge">:' . e($port) . '</span>' : '') . ($installed ? '<span class="badge warn">files ready</span>' : '') . ($autostart ? '<span class="badge ok">starts on boot</span>' : '') . '</div></div></div>' .
         '<p>' . e($summary) . '</p>' .
         '<div class="store-images">' . $imageTags . '</div>' .
         $form .
@@ -3318,6 +3367,9 @@ th {
 }
 .actions form {
   margin: 0;
+}
+.store-actions button {
+  flex: 1 1 142px;
 }
 .detail-actions {
   margin-top: 14px;
