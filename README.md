@@ -117,8 +117,10 @@ install only the images and template needed by the selected app. In production,
 the default target is `/srv/dockan-apps/APP_ID`; non-root panels default to
 `$HOME/dockan-apps/APP_ID`. `Install + Launch` runs the app with
 `dockan compose up` after the template is installed. Existing Store apps show
-`Update` and `Update + Redeploy` actions to refresh the bundled images and copy
-the latest template before optionally running `dockan compose redeploy`.
+`Update Images` and `Update Images + Redeploy` actions to force-refresh the
+bundled images from the latest Store release while keeping the installed
+`dockan.yml` and volumes. Redeploy uses the Store's `update` command when
+available.
 
 This compose file uses `isolation: none` because the panel is an admin UI: it
 must call the host `dockan` CLI and manage the host Dockan containers.

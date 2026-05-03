@@ -793,19 +793,11 @@ function store_app_update(string $dockan, bool $redeploy): string
         'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
         'test -x ' . escapeshellarg($store . '/dockan-store'),
         'test -d ' . escapeshellarg($store . '/apps/' . $app),
-        'saved_config=' . escapeshellarg($target . '/.dockan.yml.panel-save'),
-        'had_config=0',
-        'if [ -f ' . escapeshellarg($target . '/dockan.yml') . ' ]; then',
-        '  cp ' . escapeshellarg($target . '/dockan.yml') . ' "$saved_config"',
-        '  had_config=1',
-        'fi',
+        'test -f ' . escapeshellarg($target . '/dockan.yml'),
         'cd ' . escapeshellarg($store),
-        './dockan-store images ' . escapeshellarg($app),
-        'cp -a ' . escapeshellarg($store . '/apps/' . $app . '/.') . ' ' . escapeshellarg($target . '/'),
-        'if [ "$had_config" = "1" ]; then',
-        '  mv "$saved_config" ' . escapeshellarg($target . '/dockan.yml'),
-        'fi',
-        $redeploy ? store_dockan_command($dockan, ['compose', 'redeploy', '-f', $target . '/dockan.yml']) : 'true',
+        $redeploy
+            ? './dockan-store update ' . escapeshellarg($app) . ' ' . escapeshellarg($target)
+            : 'DOCKAN_STORE_FORCE_IMAGES=1 DOCKAN_STORE_REFRESH_IMAGES=1 ./dockan-store images ' . escapeshellarg($app),
         shell_command(['printf', "Store app updated: %s -> %s\n", $app, $target]),
     ]);
     return command_text(run_command(['sh', '-lc', $script]));
@@ -2261,8 +2253,8 @@ function store_app_card(array $app, bool $storeInstalled): string
         $actions .= '<button name="action" value="store-app-launch">Launch</button>';
         $actions .= '<button name="action" value="store-app-save-config">Save Config</button>';
         $actions .= '<button name="action" value="store-app-save-redeploy">Save + Redeploy</button>';
-        $actions .= '<button name="action" value="store-app-update"' . ($storeInstalled ? '' : ' disabled') . '>Update Files</button>';
-        $actions .= '<button name="action" value="store-app-redeploy"' . ($storeInstalled ? '' : ' disabled') . '>Update + Redeploy</button>';
+        $actions .= '<button name="action" value="store-app-update"' . ($storeInstalled ? '' : ' disabled') . '>Update Images</button>';
+        $actions .= '<button name="action" value="store-app-redeploy"' . ($storeInstalled ? '' : ' disabled') . '>Update Images + Redeploy</button>';
         if ($autostart) {
             $actions .= '<button name="action" value="store-app-disable-autostart">Disable Auto-start</button>';
         } else {
