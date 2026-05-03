@@ -51,7 +51,7 @@ if (isset($_GET['service-worker'])) {
     exit;
 }
 
-$dockan = getenv('DOCKAN_BIN') ?: 'dockan';
+$dockan = resolve_dockan_bin(getenv('DOCKAN_BIN') ?: 'dockan');
 $flash = null;
 $error = null;
 $view = $_GET['view'] ?? 'dashboard';
@@ -848,6 +848,94 @@ function store_app_disable_autostart(string $dockan): string
 function store_dockan_command(string $dockan, array $args): string
 {
     return shell_command(array_merge(['env', 'DOCKAN_PORT_BIND_ADDR=0.0.0.0', $dockan], $args));
+}
+
+function resolve_dockan_bin(string $configured): string
+{
+    $configured = trim($configured) ?: 'dockan';
+    if ($configured !== 'dockan') {
+        return expand_home_path($configured);
+    }
+
+    $best = null;
+    $bestVersion = null;
+    foreach (dockan_bin_candidates($configured) as $candidate) {
+        $version = dockan_version_tuple($candidate);
+        if ($version === null) {
+            continue;
+        }
+        if ($bestVersion === null || compare_version_tuple($version, $bestVersion) > 0) {
+            $best = $candidate;
+            $bestVersion = $version;
+        }
+    }
+    return $best ?: $configured;
+}
+
+function dockan_bin_candidates(string $configured): array
+{
+    $candidates = [];
+    $home = getenv('HOME') ?: '';
+    if ($home !== '') {
+        $candidates[] = $home . '/.local/bin/dockan';
+    }
+    foreach (glob('/home/*/.local/bin/dockan') ?: [] as $path) {
+        $candidates[] = $path;
+    }
+    $candidates[] = '/usr/local/bin/dockan';
+    $resolved = trim(command_output_or_empty(['sh', '-lc', 'command -v ' . escapeshellarg($configured) . ' 2>/dev/null']));
+    if ($resolved !== '') {
+        $candidates[] = $resolved;
+    }
+
+    $seen = [];
+    $out = [];
+    foreach ($candidates as $candidate) {
+        $candidate = expand_home_path($candidate);
+        if ($candidate === '' || isset($seen[$candidate]) || !is_file($candidate) || !is_executable($candidate)) {
+            continue;
+        }
+        $seen[$candidate] = true;
+        $out[] = $candidate;
+    }
+    return $out;
+}
+
+function expand_home_path(string $path): string
+{
+    $path = trim($path);
+    $home = getenv('HOME') ?: '';
+    if ($home !== '') {
+        if ($path === '~') {
+            return $home;
+        }
+        if (str_starts_with($path, '~/')) {
+            return $home . substr($path, 1);
+        }
+        $path = str_replace('$HOME', $home, $path);
+        $path = str_replace('${HOME}', $home, $path);
+    }
+    return $path;
+}
+
+function dockan_version_tuple(string $dockan): ?array
+{
+    $version = command_output_or_empty([$dockan, 'version']);
+    if (!preg_match('/dockan\s+v?(\d+)\.(\d+)\.(\d+)/i', $version, $matches)) {
+        return null;
+    }
+    return [(int) $matches[1], (int) $matches[2], (int) $matches[3]];
+}
+
+function compare_version_tuple(array $a, array $b): int
+{
+    for ($i = 0; $i < 3; $i++) {
+        $cmp = ($a[$i] ?? 0) <=> ($b[$i] ?? 0);
+        if ($cmp !== 0) {
+            return $cmp;
+        }
+    }
+    return 0;
 }
 
 function clean_store_app(string $app): string

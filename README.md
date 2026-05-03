@@ -90,6 +90,12 @@ env:
   - BIND=127.0.0.1
 ```
 
+When `DOCKAN_BIN=dockan`, the panel resolves the newest available Dockan binary
+from the usual user and system locations, so a user install in
+`~/.local/bin/dockan` can stay ahead of `/usr/local/bin/dockan` without editing
+the panel after every update. To pin a specific binary, set `DOCKAN_BIN` to an
+absolute path.
+
 On first launch, create the first admin account in the setup page. There is no
 default password and no default token.
 
