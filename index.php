@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.3';
+const APP_VERSION = 'v0.1.4';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -764,7 +764,6 @@ function store_app_autostart(string $dockan, bool $install): string
     if ($install && !is_file($store . '/dockan-store')) {
         throw new RuntimeException('Dockan Store is not installed yet. Click Install / Update Store first.');
     }
-    $service = 'dockan-' . $app . '.service';
     $lines = [
         'set -eu',
         'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
@@ -774,10 +773,8 @@ function store_app_autostart(string $dockan, bool $install): string
         $lines[] = './dockan-store install ' . escapeshellarg($app) . ' ' . escapeshellarg($target);
     }
     $lines[] = 'test -f ' . escapeshellarg($target . '/dockan.yml');
-    $lines[] = shell_command([$dockan, 'service', 'install', '-f', $target . '/dockan.yml', '--name', $app]);
-    $lines[] = 'systemctl daemon-reload';
-    $lines[] = shell_command(['systemctl', 'enable', '--now', $service]);
-    $lines[] = shell_command(['printf', "Store app autostart enabled: %s -> %s (%s)\n", $app, $target, $service]);
+    $lines[] = shell_command([$dockan, 'compose', 'autostart', '-f', $target . '/dockan.yml', '--name', $app]);
+    $lines[] = shell_command(['printf', "Store app autostart enabled: %s -> %s\n", $app, $target]);
     return system_command_text(system_shell_run(implode("\n", $lines)));
 }
 

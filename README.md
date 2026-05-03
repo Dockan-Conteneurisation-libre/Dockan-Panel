@@ -18,7 +18,7 @@
 This project is separate from the Dockan CLI repository. It is meant to live in
 its own repository and call the local `dockan` command installed on the machine.
 
-Current panel version: `v0.1.3`.
+Current panel version: `v0.1.4`.
 
 It can:
 
@@ -61,9 +61,7 @@ http://127.0.0.1:9090
 For production, install the same Dockan app as a system service with Dockan:
 
 ```bash
-sudo dockan service install -f /path/to/Dockan-Panel/dockan.yml --name dockan-panel
-sudo systemctl daemon-reload
-sudo systemctl enable --now dockan-dockan-panel.service
+sudo dockan compose autostart -f /path/to/Dockan-Panel/dockan.yml --name dockan-panel
 ```
 
 This keeps Dockan Panel managed by Dockan while starting it as a root/system
@@ -380,12 +378,12 @@ tag.
 Before tagging a new release, bump the version displayed by the panel:
 
 ```bash
-./scripts/bump-version.sh v0.1.3
+./scripts/bump-version.sh v0.1.4
 git add index.php README.md
-git commit -m "Release Dockan Panel v0.1.3"
-git tag -a v0.1.3 -m "Dockan Panel v0.1.3"
+git commit -m "Release Dockan Panel v0.1.4"
+git tag -a v0.1.4 -m "Dockan Panel v0.1.4"
 git push
-git push origin v0.1.3
+git push origin v0.1.4
 ```
 
 The pushed tag triggers `.github/workflows/release.yml`. The workflow verifies
