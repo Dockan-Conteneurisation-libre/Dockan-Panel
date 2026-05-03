@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.4';
+const APP_VERSION = 'v0.1.5';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -769,11 +769,20 @@ function store_app_autostart(string $dockan, bool $install): string
         'PATH=' . escapeshellarg(sudo_path_value()) . ':$PATH',
     ];
     if ($install) {
-        $lines[] = 'cd ' . escapeshellarg($store);
-        $lines[] = './dockan-store install ' . escapeshellarg($app) . ' ' . escapeshellarg($target);
+        $lines[] = 'if [ -f ' . escapeshellarg($target . '/dockan.yml') . ' ]; then';
+        $lines[] = '  echo "App target already exists, skipping template install."';
+        $lines[] = 'else';
+        $lines[] = '  cd ' . escapeshellarg($store);
+        $lines[] = '  ./dockan-store install ' . escapeshellarg($app) . ' ' . escapeshellarg($target);
+        $lines[] = 'fi';
     }
     $lines[] = 'test -f ' . escapeshellarg($target . '/dockan.yml');
-    $lines[] = shell_command([$dockan, 'compose', 'autostart', '-f', $target . '/dockan.yml', '--name', $app]);
+    $lines[] = 'if ! ' . shell_command([$dockan, 'compose', 'autostart', '-f', $target . '/dockan.yml', '--name', $app]) . '; then';
+    $lines[] = '  echo "Native compose autostart unavailable, falling back to service install."';
+    $lines[] = '  ' . shell_command([$dockan, 'service', 'install', '-f', $target . '/dockan.yml', '--name', $app]);
+    $lines[] = '  systemctl daemon-reload';
+    $lines[] = '  ' . shell_command(['systemctl', 'enable', '--now', 'dockan-' . $app . '.service']);
+    $lines[] = 'fi';
     $lines[] = shell_command(['printf', "Store app autostart enabled: %s -> %s\n", $app, $target]);
     return system_command_text(system_shell_run(implode("\n", $lines)));
 }
