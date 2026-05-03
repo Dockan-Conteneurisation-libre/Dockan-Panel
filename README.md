@@ -17,6 +17,7 @@ It can:
 - restore backups into a new empty volume
 - run an image with a name and optional port
 - run `dockan compose up`, `down`, `redeploy`, and `health` for a chosen `dockan.yml`
+- manage Portainer-style stacks from the UI by saving `dockan.yml` files, then deploying, stopping, redeploying, and checking health
 
 ## Start
 
@@ -43,6 +44,8 @@ dockan
 
 This compose file uses `isolation: none` because the panel is an admin UI: it
 must call the host `dockan` CLI and manage the host Dockan containers.
+
+Stacks and backups are stored in the persistent `dockan-panel-data` volume.
 
 ### Direct PHP
 

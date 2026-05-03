@@ -6,6 +6,7 @@ session_start();
 const APP_NAME = 'Dockan Panel';
 const STORAGE_DIR = __DIR__ . '/storage';
 const BACKUP_DIR = STORAGE_DIR . '/backups';
+const STACKS_DIR = STORAGE_DIR . '/stacks';
 
 ensure_storage();
 
@@ -66,6 +67,7 @@ $content = match ($view) {
     'images' => images_content($dockan),
     'volumes' => volumes_content($dockan),
     'networks' => networks_content($dockan),
+    'stacks' => stacks_content($dockan),
     'compose' => compose_content($dockan),
     'logs' => logs_content($dockan),
     default => dashboard_content($dockan),
@@ -89,6 +91,12 @@ function handle_action(string $action, string $dockan): string
         'compose-down' => compose_action($dockan, 'down'),
         'compose-redeploy' => compose_action($dockan, 'redeploy'),
         'compose-health' => compose_action($dockan, 'health'),
+        'stack-save' => stack_save(),
+        'stack-delete' => stack_delete(),
+        'stack-up' => stack_compose_action($dockan, 'up'),
+        'stack-down' => stack_compose_action($dockan, 'down'),
+        'stack-redeploy' => stack_compose_action($dockan, 'redeploy'),
+        'stack-health' => stack_compose_action($dockan, 'health'),
         default => throw new RuntimeException('Unknown action.'),
     };
 }
@@ -112,6 +120,56 @@ function compose_action(string $dockan, string $action): string
     $file = required_post('file');
     if (!is_file($file)) {
         throw new RuntimeException('dockan.yml not found.');
+    }
+    return command_text(run_dockan($dockan, ['compose', $action, '-f', $file]));
+}
+
+function stack_save(): string
+{
+    $name = clean_stack_name(required_post('name'));
+    $yaml = trim((string) ($_POST['yaml'] ?? ''));
+    if ($yaml === '') {
+        throw new RuntimeException('Stack YAML is empty.');
+    }
+    if (strlen($yaml) > 512 * 1024) {
+        throw new RuntimeException('Stack YAML is too large.');
+    }
+    $dir = stack_dir($name);
+    if (!is_dir($dir) && !mkdir($dir, 0755, true)) {
+        throw new RuntimeException('Unable to create stack directory.');
+    }
+    $file = stack_file($name);
+    if (file_put_contents($file, $yaml . "\n") === false) {
+        throw new RuntimeException('Unable to save stack.');
+    }
+    $_GET['stack'] = $name;
+    return 'Stack saved: ' . $name;
+}
+
+function stack_delete(): string
+{
+    $name = clean_stack_name(required_post('stack'));
+    $dir = stack_dir($name);
+    if (!is_dir($dir)) {
+        throw new RuntimeException('Stack not found.');
+    }
+    $file = stack_file($name);
+    if (is_file($file) && !unlink($file)) {
+        throw new RuntimeException('Unable to delete stack file.');
+    }
+    if (!rmdir($dir)) {
+        throw new RuntimeException('Unable to delete stack directory.');
+    }
+    unset($_GET['stack']);
+    return 'Stack deleted: ' . $name;
+}
+
+function stack_compose_action(string $dockan, string $action): string
+{
+    $name = clean_stack_name(required_post('stack'));
+    $file = stack_file($name);
+    if (!is_file($file)) {
+        throw new RuntimeException('Stack not found.');
     }
     return command_text(run_dockan($dockan, ['compose', $action, '-f', $file]));
 }
@@ -297,6 +355,48 @@ function compose_content(string $dockan): string
     return section('Compose', $body);
 }
 
+function stacks_content(string $dockan): string
+{
+    $stacks = stack_names();
+    $selected = trim((string) ($_POST['stack'] ?? $_GET['stack'] ?? ''));
+    if ($selected !== '') {
+        try {
+            $selected = clean_stack_name($selected);
+        } catch (Throwable) {
+            $selected = '';
+        }
+    } elseif ($stacks) {
+        $selected = $stacks[0];
+    }
+    $yaml = $selected !== '' && is_file(stack_file($selected)) ? (string) file_get_contents(stack_file($selected)) : default_stack_yaml();
+    $nameValue = $selected !== '' ? $selected : 'my-stack';
+
+    $list = '<div class="table-wrap"><table><thead><tr><th>Name</th><th>File</th><th>Actions</th></tr></thead><tbody>';
+    foreach ($stacks as $stack) {
+        $list .= '<tr><td><a href="?view=stacks&stack=' . rawurlencode($stack) . '">' . e($stack) . '</a></td><td class="path">' . e(stack_file($stack)) . '</td><td class="actions">' .
+            post_button('stack-up', ['stack' => $stack], 'Deploy') .
+            post_button('stack-down', ['stack' => $stack], 'Stop') .
+            post_button('stack-redeploy', ['stack' => $stack], 'Redeploy') .
+            post_button('stack-health', ['stack' => $stack], 'Health') .
+            post_button('stack-delete', ['stack' => $stack], 'Delete', 'danger') .
+            '</td></tr>';
+    }
+    if (!$stacks) {
+        $list .= '<tr><td colspan="3" class="muted">No stacks yet.</td></tr>';
+    }
+    $list .= '</tbody></table></div>';
+
+    $editor = '<form method="post" class="stack-form">' . csrf_field() .
+        ($selected !== '' ? '<input type="hidden" name="stack" value="' . e($selected) . '">' : '') .
+        '<label>Stack name<input name="name" value="' . e($nameValue) . '" placeholder="my-stack" required></label>' .
+        '<label>dockan.yml<textarea name="yaml" class="stack-editor" spellcheck="false" required>' . e($yaml) . '</textarea></label>' .
+        '<div class="actions"><button name="action" value="stack-save">Save Stack</button>' .
+        ($selected !== '' ? action_submit('stack-up', 'Deploy') . action_submit('stack-redeploy', 'Redeploy') . action_submit('stack-health', 'Health') : '') .
+        '</div></form>';
+
+    return section('Stacks', $list) . section($selected === '' ? 'Create Stack' : 'Edit Stack: ' . $selected, $editor);
+}
+
 function logs_content(string $dockan): string
 {
     $name = trim((string) ($_GET['name'] ?? $_POST['name'] ?? ''));
@@ -475,6 +575,7 @@ function nav_html(): string
         'images' => 'Images',
         'volumes' => 'Volumes',
         'networks' => 'Networks',
+        'stacks' => 'Stacks',
         'compose' => 'Compose',
         'logs' => 'Logs',
     ];
@@ -507,6 +608,63 @@ function ensure_storage(): void
     if (!is_dir(BACKUP_DIR)) {
         mkdir(BACKUP_DIR, 0755, true);
     }
+    if (!is_dir(STACKS_DIR)) {
+        mkdir(STACKS_DIR, 0755, true);
+    }
+}
+
+function clean_stack_name(string $name): string
+{
+    $name = trim($name);
+    if (!preg_match('/^[A-Za-z0-9_.-]{1,64}$/', $name)) {
+        throw new RuntimeException('Invalid stack name. Use letters, numbers, dot, dash, or underscore.');
+    }
+    return $name;
+}
+
+function stack_dir(string $name): string
+{
+    return STACKS_DIR . '/' . clean_stack_name($name);
+}
+
+function stack_file(string $name): string
+{
+    return stack_dir($name) . '/dockan.yml';
+}
+
+function stack_names(): array
+{
+    $entries = is_dir(STACKS_DIR) ? scandir(STACKS_DIR) : [];
+    $names = [];
+    foreach ($entries ?: [] as $entry) {
+        if ($entry === '.' || $entry === '..') {
+            continue;
+        }
+        if (is_dir(STACKS_DIR . '/' . $entry) && is_file(STACKS_DIR . '/' . $entry . '/dockan.yml')) {
+            try {
+                $names[] = clean_stack_name($entry);
+            } catch (Throwable) {
+            }
+        }
+    }
+    sort($names);
+    return $names;
+}
+
+function default_stack_yaml(): string
+{
+    return <<<'YAML'
+name: my-stack
+services:
+  web:
+    image: myapp:latest
+    ports:
+      - 8080:8080
+    env:
+      - PORT=8080
+    restart: always
+    healthcheck: CMD-SHELL curl -f http://127.0.0.1:8080/
+YAML;
 }
 
 function human_bytes(int $bytes): string
@@ -635,16 +793,26 @@ button {
 }
 button:hover { filter: brightness(0.96); }
 button.danger, .danger button, .alert.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
-input, select {
+input, select, textarea {
   width: 100%;
-  min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 0 10px;
   background: #fff;
   color: var(--ink);
 }
-input:focus, select:focus {
+input, select {
+  min-height: 38px;
+  padding: 0 10px;
+}
+textarea {
+  min-height: 340px;
+  padding: 12px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
   outline: 3px solid #eef6f1;
 }
@@ -731,6 +899,10 @@ th {
   margin-bottom: 16px;
 }
 .compose-form { grid-template-columns: 1fr auto; }
+.stack-form {
+  display: grid;
+  gap: 14px;
+}
 .auth {
   width: min(440px, calc(100vw - 32px));
   margin: 12vh auto;
