@@ -2,5 +2,6 @@ FROM php:8.3
 WORKDIR /app
 COPY index.php /app/index.php
 COPY README.md /app/README.md
+COPY dockan-logo.svg /app/dockan-logo.svg
 EXPOSE 9090
 CMD exec php -S 0.0.0.0:9090 index.php

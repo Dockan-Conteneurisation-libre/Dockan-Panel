@@ -9,6 +9,12 @@ const BACKUP_DIR = STORAGE_DIR . '/backups';
 
 ensure_storage();
 
+if (($_GET['asset'] ?? '') === 'logo') {
+    header('Content-Type: image/svg+xml');
+    readfile(__DIR__ . '/dockan-logo.svg');
+    exit;
+}
+
 $token = getenv('DOCKAN_UI_TOKEN') ?: '';
 $dockan = getenv('DOCKAN_BIN') ?: 'dockan';
 $flash = null;
@@ -458,7 +464,7 @@ function render_page(string $title, string $content, bool $with_nav, ?string $fl
     if ($error) {
         $messages .= '<div class="alert danger">' . e($error) . '</div>';
     }
-    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' . e($title) . ' - Dockan Panel</title><style>' . css() . '</style></head><body>' . $nav . '<main class="shell">' . $messages . $content . '</main></body></html>';
+    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" type="image/svg+xml" href="?asset=logo"><title>' . e($title) . ' - Dockan Panel</title><style>' . css() . '</style></head><body>' . $nav . '<main class="shell">' . $messages . $content . '</main></body></html>';
 }
 
 function nav_html(): string
@@ -472,7 +478,7 @@ function nav_html(): string
         'compose' => 'Compose',
         'logs' => 'Logs',
     ];
-    $html = '<header><div class="topbar"><a class="brand" href="?view=dashboard"><span class="brand-mark">D</span><span>Dockan Panel</span></a><nav>';
+    $html = '<header><div class="topbar"><a class="brand" href="?view=dashboard"><img src="?asset=logo" alt=""><span>Dockan Panel</span></a><nav>';
     foreach ($items as $key => $label) {
         $active = ($_GET['view'] ?? 'dashboard') === $key ? ' class="active"' : '';
         $html .= '<a' . $active . ' href="?view=' . e($key) . '">' . e($label) . '</a>';
@@ -576,16 +582,9 @@ header {
   white-space: nowrap;
   font-size: 1.08rem;
 }
-.brand-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.brand img {
   width: 40px;
   height: 40px;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
-  box-shadow: var(--shadow);
 }
 nav {
   display: flex;
