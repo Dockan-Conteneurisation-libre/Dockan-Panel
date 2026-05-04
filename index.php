@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.15';
+const APP_VERSION = 'v0.1.16';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -196,6 +196,7 @@ function handle_action(string $action, string $dockan): string
         'store-app-launch' => store_app_launch($dockan),
         'store-app-update' => store_app_update($dockan, false),
         'store-app-redeploy' => store_app_update($dockan, true),
+        'store-static-site-upload' => store_static_site_upload(),
         'store-app-save-config' => store_app_save_config($dockan, false),
         'store-app-save-redeploy' => store_app_save_config($dockan, true),
         'add-user' => add_user_action(),
@@ -937,6 +938,223 @@ function store_app_disable_autostart(string $dockan): string
         shell_command(['printf', "Store app autostart disabled: %s -> %s\n", $app, $target]),
     ];
     return system_command_text(system_shell_run(implode("\n", $lines)));
+}
+
+function store_static_site_upload(): string
+{
+    $app = clean_store_app(required_post('app'));
+    if ($app !== 'static-site') {
+        throw new RuntimeException('Static site uploads are only available for the Static Site app.');
+    }
+
+    $target = clean_store_target(required_post('target'));
+    if (!is_file($target . '/dockan.yml')) {
+        throw new RuntimeException('Install Static Site before uploading website files.');
+    }
+
+    $publicDir = $target . '/public';
+    if (!is_dir($publicDir) && !mkdir($publicDir, 0755, true)) {
+        throw new RuntimeException('Unable to create the Static Site public folder.');
+    }
+    $realPublic = realpath($publicDir);
+    if ($realPublic === false) {
+        throw new RuntimeException('Unable to resolve the Static Site public folder.');
+    }
+
+    if (isset($_POST['replace_existing'])) {
+        empty_directory($realPublic);
+    }
+
+    $count = 0;
+    $zip = $_FILES['site_zip'] ?? null;
+    if (is_array($zip) && (int) ($zip['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+        $count += extract_static_site_zip($zip, $realPublic);
+    }
+
+    $files = $_FILES['site_files'] ?? null;
+    if (is_array($files)) {
+        $count += move_static_site_uploads($files, $realPublic);
+    }
+
+    if ($count < 1) {
+        throw new RuntimeException('Choose a .zip file or at least one website file.');
+    }
+
+    return 'Static Site upload complete: ' . $count . ' file(s) copied to ' . $realPublic;
+}
+
+function extract_static_site_zip(array $file, string $publicDir): int
+{
+    upload_error_guard((int) ($file['error'] ?? UPLOAD_ERR_NO_FILE));
+    $tmp = (string) ($file['tmp_name'] ?? '');
+    $name = (string) ($file['name'] ?? '');
+    if ($tmp === '' || !is_uploaded_file($tmp)) {
+        throw new RuntimeException('Invalid uploaded zip file.');
+    }
+    if (!str_ends_with(strtolower($name), '.zip')) {
+        throw new RuntimeException('The archive must be a .zip file.');
+    }
+    if (!class_exists('ZipArchive')) {
+        throw new RuntimeException('PHP ZipArchive is not available on this panel.');
+    }
+
+    $zip = new ZipArchive();
+    if ($zip->open($tmp) !== true) {
+        throw new RuntimeException('Unable to open the uploaded zip file.');
+    }
+
+    $count = 0;
+    for ($i = 0; $i < $zip->numFiles; $i++) {
+        $entry = (string) $zip->getNameIndex($i);
+        if ($entry === '' || str_ends_with($entry, '/')) {
+            continue;
+        }
+        $relative = clean_static_site_upload_path($entry);
+        $dest = static_site_destination($publicDir, $relative);
+        ensure_parent_dir($dest);
+        $stream = $zip->getStream($entry);
+        if ($stream === false) {
+            $zip->close();
+            throw new RuntimeException('Unable to read zip entry: ' . $entry);
+        }
+        $out = fopen($dest, 'wb');
+        if ($out === false) {
+            fclose($stream);
+            $zip->close();
+            throw new RuntimeException('Unable to write file: ' . $relative);
+        }
+        stream_copy_to_stream($stream, $out);
+        fclose($stream);
+        fclose($out);
+        chmod($dest, 0644);
+        $count++;
+    }
+    $zip->close();
+    return $count;
+}
+
+function move_static_site_uploads(array $files, string $publicDir): int
+{
+    $names = is_array($files['name'] ?? null) ? $files['name'] : [];
+    $tmpNames = is_array($files['tmp_name'] ?? null) ? $files['tmp_name'] : [];
+    $errors = is_array($files['error'] ?? null) ? $files['error'] : [];
+    $fullPaths = is_array($files['full_path'] ?? null) ? $files['full_path'] : [];
+    $count = 0;
+
+    foreach ($names as $index => $name) {
+        $error = (int) ($errors[$index] ?? UPLOAD_ERR_NO_FILE);
+        if ($error === UPLOAD_ERR_NO_FILE) {
+            continue;
+        }
+        upload_error_guard($error);
+        $tmp = (string) ($tmpNames[$index] ?? '');
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            throw new RuntimeException('Invalid uploaded file.');
+        }
+        $relative = clean_static_site_upload_path((string) ($fullPaths[$index] ?? $name));
+        $dest = static_site_destination($publicDir, $relative);
+        ensure_parent_dir($dest);
+        if (!move_uploaded_file($tmp, $dest)) {
+            throw new RuntimeException('Unable to save uploaded file: ' . $relative);
+        }
+        chmod($dest, 0644);
+        $count++;
+    }
+
+    return $count;
+}
+
+function upload_error_guard(int $error): void
+{
+    if ($error === UPLOAD_ERR_OK) {
+        return;
+    }
+    $labels = [
+        UPLOAD_ERR_INI_SIZE => 'The uploaded file is larger than the server limit.',
+        UPLOAD_ERR_FORM_SIZE => 'The uploaded file is larger than the form limit.',
+        UPLOAD_ERR_PARTIAL => 'The upload was interrupted.',
+        UPLOAD_ERR_NO_TMP_DIR => 'The server has no temporary upload folder.',
+        UPLOAD_ERR_CANT_WRITE => 'The server could not write the uploaded file.',
+        UPLOAD_ERR_EXTENSION => 'A PHP extension blocked the upload.',
+    ];
+    throw new RuntimeException($labels[$error] ?? 'Upload failed.');
+}
+
+function clean_static_site_upload_path(string $path): string
+{
+    $path = str_replace('\\', '/', trim($path));
+    $path = ltrim($path, '/');
+    if ($path === '' || str_contains($path, "\0")) {
+        throw new RuntimeException('Invalid uploaded file path.');
+    }
+    $parts = [];
+    foreach (explode('/', $path) as $part) {
+        $part = trim($part);
+        if ($part === '' || $part === '.') {
+            continue;
+        }
+        if ($part === '..') {
+            throw new RuntimeException('Uploaded paths cannot contain ..');
+        }
+        $parts[] = $part;
+    }
+    if (!$parts) {
+        throw new RuntimeException('Invalid uploaded file path.');
+    }
+    return implode('/', $parts);
+}
+
+function static_site_destination(string $publicDir, string $relative): string
+{
+    $dest = $publicDir . DIRECTORY_SEPARATOR . $relative;
+    $parent = dirname($dest);
+    if (!is_dir($parent) && !mkdir($parent, 0755, true)) {
+        throw new RuntimeException('Unable to create upload folder.');
+    }
+    $realParent = realpath($parent);
+    if ($realParent === false || ($realParent !== $publicDir && !str_starts_with($realParent, $publicDir . DIRECTORY_SEPARATOR))) {
+        throw new RuntimeException('Upload path escapes the Static Site public folder.');
+    }
+    return $dest;
+}
+
+function ensure_parent_dir(string $file): void
+{
+    $dir = dirname($file);
+    if (!is_dir($dir) && !mkdir($dir, 0755, true)) {
+        throw new RuntimeException('Unable to create destination folder.');
+    }
+}
+
+function empty_directory(string $dir): void
+{
+    foreach (scandir($dir) ?: [] as $item) {
+        if ($item === '.' || $item === '..') {
+            continue;
+        }
+        remove_path($dir . DIRECTORY_SEPARATOR . $item);
+    }
+}
+
+function remove_path(string $path): void
+{
+    if (is_dir($path) && !is_link($path)) {
+        foreach (scandir($path) ?: [] as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+            remove_path($path . DIRECTORY_SEPARATOR . $item);
+        }
+        if (!rmdir($path)) {
+            throw new RuntimeException('Unable to remove folder: ' . $path);
+        }
+        return;
+    }
+    if (is_file($path) || is_link($path)) {
+        if (!unlink($path)) {
+            throw new RuntimeException('Unable to remove file: ' . $path);
+        }
+    }
 }
 
 function store_dockan_command(string $dockan, array $args): string
@@ -2297,13 +2515,33 @@ function store_app_card(array $app, bool $storeInstalled): string
         '<label>Install folder<input name="target" value="' . e($target) . '" required></label>' .
         $configEditor .
         '<div class="actions store-actions">' . $actions . '</div></form>';
+    $extraTools = '';
+    if ($installed && $id === 'static-site') {
+        $extraTools = static_site_upload_form($id, $target);
+    }
 
     return '<article class="store-card">' .
         '<div class="store-card-head"><div class="store-logo">' . ($logo !== '' ? '<img src="' . e($logo) . '" alt="" loading="lazy">' : e($initials)) . '</div><div><h3>' . e($name) . '</h3><div class="badge-row"><span class="badge ok">' . e($category) . '</span>' . ($port !== '' ? '<span class="badge">:' . e($port) . '</span>' : '') . ($installed ? '<span class="badge warn">files ready</span>' : '') . $updateBadge . ($autostart ? '<span class="badge ok">starts on boot</span>' : '') . '</div></div></div>' .
         '<p>' . e($summary) . '</p>' .
         '<div class="store-images">' . $imageTags . '</div>' .
         $form .
+        $extraTools .
         '</article>';
+}
+
+function static_site_upload_form(string $app, string $target): string
+{
+    return '<details class="store-config static-site-upload"><summary>Website files</summary>' .
+        '<form method="post" enctype="multipart/form-data" class="store-card-form">' . csrf_field() .
+        '<input type="hidden" name="action" value="store-static-site-upload">' .
+        '<input type="hidden" name="app" value="' . e($app) . '">' .
+        '<input type="hidden" name="target" value="' . e($target) . '">' .
+        '<label>Upload a zip<input type="file" name="site_zip" accept=".zip,application/zip"></label>' .
+        '<label>Or upload files<input type="file" name="site_files[]" multiple></label>' .
+        '<label class="check-row"><input type="checkbox" name="replace_existing" value="1"> Replace current website files</label>' .
+        '<div class="actions store-actions"><button>Upload Website Files</button></div>' .
+        '<span class="help">Upload an <code>index.html</code>, assets, or a complete zip. Files are copied to <code>' . e($target . '/public') . '</code> and are served immediately.</span>' .
+        '</form></details>';
 }
 
 function store_app_config_yaml(string $app, string $target, bool $installed): string
