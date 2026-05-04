@@ -20,6 +20,10 @@ its own repository and call the local `dockan` command installed on the machine.
 
 Current panel version: `v0.1.15`.
 
+## Interface
+
+![Dockan Panel interface](./DockanPanel.png)
+
 It can:
 
 - list containers, images, volumes, and networks
