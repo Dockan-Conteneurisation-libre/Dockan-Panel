@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.16';
+const APP_VERSION = 'v0.1.17';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -995,9 +995,14 @@ function extract_static_site_zip(array $file, string $publicDir): int
         throw new RuntimeException('The archive must be a .zip file.');
     }
     if (!class_exists('ZipArchive')) {
-        throw new RuntimeException('PHP ZipArchive is not available on this panel.');
+        return extract_static_site_zip_with_unzip($tmp, $publicDir);
     }
 
+    return extract_static_site_zip_with_ziparchive($tmp, $publicDir);
+}
+
+function extract_static_site_zip_with_ziparchive(string $tmp, string $publicDir): int
+{
     $zip = new ZipArchive();
     if ($zip->open($tmp) !== true) {
         throw new RuntimeException('Unable to open the uploaded zip file.');
@@ -1030,6 +1035,72 @@ function extract_static_site_zip(array $file, string $publicDir): int
         $count++;
     }
     $zip->close();
+    return $count;
+}
+
+function extract_static_site_zip_with_unzip(string $tmp, string $publicDir): int
+{
+    $probe = run_command(['sh', '-lc', 'command -v unzip >/dev/null 2>&1']);
+    if ((int) $probe['code'] !== 0) {
+        throw new RuntimeException('Zip uploads need either PHP ZipArchive or the system unzip command.');
+    }
+
+    $list = run_command(['unzip', '-Z1', $tmp]);
+    if ((int) $list['code'] !== 0) {
+        throw new RuntimeException(command_text($list));
+    }
+    foreach (preg_split('/\R+/', trim((string) $list['stdout'])) ?: [] as $entry) {
+        if ($entry === '' || str_ends_with($entry, '/')) {
+            continue;
+        }
+        clean_static_site_upload_path($entry);
+    }
+
+    $tmpDir = rtrim(sys_get_temp_dir(), '/') . '/dockan-static-site-' . bin2hex(random_bytes(8));
+    if (!mkdir($tmpDir, 0700, true)) {
+        throw new RuntimeException('Unable to create temporary unzip folder.');
+    }
+
+    try {
+        $result = run_command(['unzip', '-qq', $tmp, '-d', $tmpDir]);
+        if ((int) $result['code'] !== 0) {
+            throw new RuntimeException(command_text($result));
+        }
+        $count = copy_static_site_tree($tmpDir, $publicDir, strlen($tmpDir) + 1);
+    } finally {
+        remove_path($tmpDir);
+    }
+
+    return $count;
+}
+
+function copy_static_site_tree(string $sourceDir, string $publicDir, int $baseLen): int
+{
+    $count = 0;
+    foreach (scandir($sourceDir) ?: [] as $item) {
+        if ($item === '.' || $item === '..') {
+            continue;
+        }
+        $source = $sourceDir . DIRECTORY_SEPARATOR . $item;
+        if (is_link($source)) {
+            throw new RuntimeException('Zip uploads cannot contain symbolic links.');
+        }
+        if (is_dir($source)) {
+            $count += copy_static_site_tree($source, $publicDir, $baseLen);
+            continue;
+        }
+        if (!is_file($source)) {
+            continue;
+        }
+        $relative = clean_static_site_upload_path(str_replace(DIRECTORY_SEPARATOR, '/', substr($source, $baseLen)));
+        $dest = static_site_destination($publicDir, $relative);
+        ensure_parent_dir($dest);
+        if (!copy($source, $dest)) {
+            throw new RuntimeException('Unable to copy zip file: ' . $relative);
+        }
+        chmod($dest, 0644);
+        $count++;
+    }
     return $count;
 }
 
