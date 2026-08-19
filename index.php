@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.17';
+const APP_VERSION = 'v0.1.18';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -2840,7 +2840,7 @@ function store_icon_slug(string $id): string
         'jellyfin' => 'jellyfin',
         'libretranslate' => 'libretranslate',
         'matomo' => 'matomo',
-        'miniflux' => 'miniflux',
+        'miniflux' => 'rss',
         'n8n' => 'n8n',
         'nextcloud' => 'nextcloud',
         'nginx-proxy-manager' => 'nginxproxymanager',
