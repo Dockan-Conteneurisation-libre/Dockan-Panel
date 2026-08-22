@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.19';
+const APP_VERSION = 'v0.1.20';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -4327,12 +4327,25 @@ th {
   white-space: pre-wrap;
   border: 1px solid var(--line);
 }
-.compose-form, .inline-form {
+.compose-form {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: 1fr auto;
   gap: 12px;
   align-items: end;
   margin-bottom: 16px;
+}
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+.inline-form input {
+  flex: 1 1 180px;
+}
+.inline-form button {
+  flex: 0 0 auto;
 }
 .package-form {
   display: grid;
