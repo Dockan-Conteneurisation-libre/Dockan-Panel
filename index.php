@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.18';
+const APP_VERSION = 'v0.1.19';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -2831,25 +2831,35 @@ function store_app_logo(array $app): string
 function store_icon_slug(string $id): string
 {
     return [
+        'anarcosyndicalismebook' => 'bookstack',
         'bookstack' => 'bookstack',
+        'discourse' => 'discourse',
         'drawio' => 'diagramsdotnet',
+        'forgejo' => 'forgejo',
         'ghost' => 'ghost',
         'gitea' => 'gitea',
         'grafana' => 'grafana',
         'hedgedoc' => 'hedgedoc',
+        'immich' => 'immich',
         'jellyfin' => 'jellyfin',
         'libretranslate' => 'libretranslate',
         'matomo' => 'matomo',
+        'mattermost' => 'mattermost',
+        'mealie' => 'mealie',
         'miniflux' => 'rss',
         'n8n' => 'n8n',
         'nextcloud' => 'nextcloud',
         'nginx-proxy-manager' => 'nginxproxymanager',
         'paperless-ngx' => 'paperlessngx',
+        'plausible' => 'plausibleanalytics',
+        'prestashop' => 'prestashop',
         'prometheus' => 'prometheus',
         'static-site' => 'caddy',
+        'stirling-pdf' => 'files',
         'syncthing' => 'syncthing',
         'uptime-kuma' => 'uptimekuma',
         'vaultwarden' => 'vaultwarden',
+        'vikunja' => 'vikunja',
         'wallabag' => 'wallabag',
         'wordpress' => 'wordpress',
     ][$id] ?? '';
