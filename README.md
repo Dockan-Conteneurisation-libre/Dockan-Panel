@@ -18,7 +18,7 @@
 This project is separate from the Dockan CLI repository. It is meant to live in
 its own repository and call the local `dockan` command installed on the machine.
 
-Current panel version: `v0.1.20`.
+Current panel version: `v0.2.0`.
 
 ## Interface
 
@@ -27,6 +27,7 @@ Current panel version: `v0.1.20`.
 It can:
 
 - list containers, images, volumes, and networks
+- pull OCI images directly from Docker Hub, GitHub Container Registry (GHCR), Quay, or custom registries
 - show Dockan CLI `ps --scope all` results when available, so user and system stores appear in the same Containers view
 - show logs
 - run healthchecks
@@ -35,11 +36,11 @@ It can:
 - create volumes
 - back up volumes to local `storage/backups`
 - restore backups into a new empty volume
-- create containers from local images with ports, volumes, environment variables, network, aliases, restart policy, healthcheck, CPU/RAM limits, GUI sockets, entrypoint, and command
-- run `dockan compose up`, `down`, `redeploy`, and `health` for a chosen `dockan.yml`
-- manage Portainer-style stacks from the UI by saving `dockan.yml` files, then deploying, stopping, redeploying, and checking health
+- create containers from local images or pull directly on-the-fly (with autocomplete) with ports, volumes, environment variables, network, aliases, restart policy, healthcheck, CPU/RAM limits, GUI sockets, entrypoint, and command
+- run `dockan compose up`, `down`, `redeploy`, and `health` for `dockan.yml`, `compose.yaml`, or `docker-compose.yml`
+- manage Portainer-style stacks from the UI by saving compose files, then deploying, stopping, redeploying, and checking health
 - import required stack images from a local Dockan registry folder before deployment
-- install and update Dockan Store from the panel, then install Store apps with one click
+- install and update Dockan Store from the panel, then install 31 Store apps with one click
 - inspect Dockan, PHP, FrankenPHP, and Dockan Panel versions, preview dependency installs, install host packages/runtimes, run Dockan updates, and update the panel from GitHub
 - open a container detail page with actions, inspect output, logs, a live PTY terminal, and a one-shot exec fallback
 - manage admin users with password login, optional authenticator-app 2FA, and passkeys

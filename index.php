@@ -18,7 +18,7 @@ session_start();
 security_headers();
 
 const APP_NAME = 'Dockan Panel';
-const APP_VERSION = 'v0.1.20';
+const APP_VERSION = 'v0.2.0';
 const PANEL_REPO = 'Dockan-Conteneurisation-libre/Dockan-Panel';
 const PANEL_SERVICE = 'dockan-dockan-panel.service';
 const STORAGE_DIR = __DIR__ . '/storage';
@@ -157,6 +157,7 @@ function handle_action(string $action, string $dockan): string
         'start-container-app' => container_compose_action($dockan, 'up'),
         'restart-container-app' => container_compose_action($dockan, 'redeploy'),
         'exec-container' => exec_container_command($dockan),
+        'pull-image' => command_text(run_dockan($dockan, ['pull', required_post('ref')])),
         'remove-image' => command_text(run_dockan($dockan, ['rmi', required_post('tag')])),
         'create-volume' => command_text(run_dockan($dockan, ['volume', 'create', required_post('name')])),
         'remove-volume' => command_text(run_dockan($dockan, ['volume', 'rm', required_post('name')])),
@@ -2436,6 +2437,11 @@ function container_compose_file(string $name): ?string
 
 function images_content(string $dockan): string
 {
+    $pullForm = '<form method="post" class="inline-form">' . csrf_field() .
+        '<input type="hidden" name="action" value="pull-image">' .
+        '<input name="ref" placeholder="alpine:latest or nginx:alpine or ghcr.io/..." required style="min-width: 320px;">' .
+        '<button>Pull Image (OCI / Docker Hub)</button>' .
+        '</form>';
     $rows = parse_table(command_or_empty($dockan, ['images']));
     $body = '<div class="table-wrap"><table><thead><tr><th>Tag</th><th>Name</th><th>Path</th><th>Actions</th></tr></thead><tbody>';
     foreach ($rows as $row) {
@@ -2448,7 +2454,7 @@ function images_content(string $dockan): string
         $body .= '<tr><td colspan="4" class="muted">No images.</td></tr>';
     }
     $body .= '</tbody></table></div>';
-    return section('Images', $body);
+    return section('Images', $pullForm . $body);
 }
 
 function volumes_content(string $dockan): string
@@ -2880,25 +2886,35 @@ function store_apps(): array
 function store_fallback_apps(): array
 {
     return [
+        ['id' => 'anarcosyndicalismebook', 'name' => 'AnarcosyndicalismeBOOK', 'category' => 'cms', 'summary' => 'Anarcho-syndicalist CMS and publishing engine with SQLite/PHP.', 'default_port' => 8097, 'requires' => ['anarcosyndicalismebook:local']],
         ['id' => 'bookstack', 'name' => 'BookStack', 'category' => 'wiki', 'summary' => 'Documentation wiki with MariaDB.', 'default_port' => 8087, 'requires' => ['bookstack:local', 'mariadb:local']],
+        ['id' => 'discourse', 'name' => 'Discourse', 'category' => 'community', 'summary' => 'Community discussion platform with PostgreSQL and Redis.', 'default_port' => 8091, 'requires' => ['discourse:local', 'postgres:local', 'redis:local']],
         ['id' => 'drawio', 'name' => 'draw.io', 'category' => 'diagrams', 'summary' => 'Diagram editor.', 'default_port' => 8089, 'requires' => ['drawio:local']],
+        ['id' => 'forgejo', 'name' => 'Forgejo', 'category' => 'git', 'summary' => 'Community-driven lightweight Git forge with PostgreSQL.', 'default_port' => 3004, 'requires' => ['forgejo:local', 'postgres:local']],
         ['id' => 'ghost', 'name' => 'Ghost', 'category' => 'publishing', 'summary' => 'Publishing platform with MySQL.', 'default_port' => 2368, 'requires' => ['ghost:local', 'mysql:local']],
         ['id' => 'gitea', 'name' => 'Gitea', 'category' => 'git', 'summary' => 'Lightweight Git forge with PostgreSQL.', 'default_port' => 3000, 'requires' => ['gitea:local', 'postgres:local']],
         ['id' => 'grafana', 'name' => 'Grafana', 'category' => 'monitoring', 'summary' => 'Dashboards and visualization for metrics.', 'default_port' => 3002, 'requires' => ['grafana:local']],
         ['id' => 'hedgedoc', 'name' => 'HedgeDoc', 'category' => 'notes', 'summary' => 'Collaborative markdown notes with PostgreSQL.', 'default_port' => 3003, 'requires' => ['hedgedoc:local', 'postgres:local']],
+        ['id' => 'immich', 'name' => 'Immich', 'category' => 'photos', 'summary' => 'High performance self-hosted photo and video backup solution.', 'default_port' => 2283, 'requires' => ['immich-server:local', 'immich-machine-learning:local', 'postgres:local', 'redis:local']],
         ['id' => 'jellyfin', 'name' => 'Jellyfin', 'category' => 'media', 'summary' => 'Local media server.', 'default_port' => 8096, 'requires' => ['jellyfin:local']],
         ['id' => 'libretranslate', 'name' => 'LibreTranslate', 'category' => 'ai', 'summary' => 'Local machine translation API and web UI.', 'default_port' => 5000, 'requires' => ['libretranslate:local']],
         ['id' => 'matomo', 'name' => 'Matomo', 'category' => 'analytics', 'summary' => 'Web analytics with MariaDB.', 'default_port' => 8083, 'requires' => ['matomo:local', 'mariadb:local']],
+        ['id' => 'mattermost', 'name' => 'Mattermost', 'category' => 'chat', 'summary' => 'Open source secure collaboration and chat platform.', 'default_port' => 8065, 'requires' => ['mattermost:local', 'postgres:local']],
+        ['id' => 'mealie', 'name' => 'Mealie', 'category' => 'food', 'summary' => 'Recipe manager and meal planner with SQLite/PostgreSQL.', 'default_port' => 9925, 'requires' => ['mealie:local']],
         ['id' => 'miniflux', 'name' => 'Miniflux', 'category' => 'rss', 'summary' => 'Minimal RSS reader with PostgreSQL.', 'default_port' => 8085, 'requires' => ['miniflux:local', 'postgres:local']],
         ['id' => 'n8n', 'name' => 'n8n', 'category' => 'automation', 'summary' => 'Workflow automation with PostgreSQL.', 'default_port' => 5678, 'requires' => ['n8n:local', 'postgres:local']],
         ['id' => 'nextcloud', 'name' => 'Nextcloud', 'category' => 'files', 'summary' => 'Private files, sync, calendar, contacts, and collaboration.', 'default_port' => 8081, 'requires' => ['nextcloud:local', 'mariadb:local', 'redis:local']],
         ['id' => 'nginx-proxy-manager', 'name' => 'Nginx Proxy Manager', 'category' => 'proxy', 'summary' => 'Web UI for reverse proxy hosts and TLS certificates.', 'default_port' => 8181, 'requires' => ['nginx-proxy-manager:local']],
         ['id' => 'paperless-ngx', 'name' => 'Paperless-ngx', 'category' => 'documents', 'summary' => 'Document management with OCR, PostgreSQL, and Redis.', 'default_port' => 8000, 'requires' => ['paperless-ngx:local', 'postgres:local', 'redis:local']],
+        ['id' => 'plausible', 'name' => 'Plausible Analytics', 'category' => 'analytics', 'summary' => 'Lightweight privacy-focused web analytics with PostgreSQL and ClickHouse.', 'default_port' => 8001, 'requires' => ['plausible:local', 'postgres:local', 'clickhouse:local']],
+        ['id' => 'prestashop', 'name' => 'PrestaShop', 'category' => 'ecommerce', 'summary' => 'Open source e-commerce web platform with MySQL.', 'default_port' => 8092, 'requires' => ['prestashop:local', 'mysql:local']],
         ['id' => 'prometheus', 'name' => 'Prometheus', 'category' => 'monitoring', 'summary' => 'Metrics database and scraper.', 'default_port' => 9091, 'requires' => ['prometheus:local']],
         ['id' => 'static-site', 'name' => 'Static Site', 'category' => 'web', 'summary' => 'Serve a static public folder with Caddy.', 'default_port' => 8088, 'requires' => ['caddy:local']],
+        ['id' => 'stirling-pdf', 'name' => 'Stirling-PDF', 'category' => 'documents', 'summary' => 'Robust locally hosted web application for PDF manipulation.', 'default_port' => 8094, 'requires' => ['stirling-pdf:local']],
         ['id' => 'syncthing', 'name' => 'Syncthing', 'category' => 'sync', 'summary' => 'Peer-to-peer file synchronization.', 'default_port' => 8384, 'requires' => ['syncthing:local']],
         ['id' => 'uptime-kuma', 'name' => 'Uptime Kuma', 'category' => 'monitoring', 'summary' => 'Monitoring dashboard for services and websites.', 'default_port' => 3001, 'requires' => ['uptime-kuma:local']],
         ['id' => 'vaultwarden', 'name' => 'Vaultwarden', 'category' => 'passwords', 'summary' => 'Lightweight Bitwarden-compatible password manager.', 'default_port' => 8082, 'requires' => ['vaultwarden:local']],
+        ['id' => 'vikunja', 'name' => 'Vikunja', 'category' => 'tasks', 'summary' => 'To-do list and task management application with PostgreSQL.', 'default_port' => 3456, 'requires' => ['vikunja:local', 'postgres:local']],
         ['id' => 'wallabag', 'name' => 'Wallabag', 'category' => 'read-it-later', 'summary' => 'Save articles and read them later.', 'default_port' => 8086, 'requires' => ['wallabag:local', 'postgres:local']],
         ['id' => 'wordpress', 'name' => 'WordPress', 'category' => 'cms', 'summary' => 'Blog and CMS with MariaDB.', 'default_port' => 8080, 'requires' => ['wordpress:local', 'mariadb:local']],
     ];
@@ -3077,7 +3093,7 @@ function compose_content(string $dockan): string
     $default = getcwd() . '/dockan.yml';
     $file = e((string) ($_POST['file'] ?? $_GET['file'] ?? $default));
     $body = '<form method="post" class="compose-form">' . csrf_field() .
-        '<label>dockan.yml path<input name="file" value="' . $file . '" required></label>' .
+        '<label>dockan.yml or compose.yaml path<input name="file" value="' . $file . '" placeholder="/path/to/dockan.yml or compose.yaml" required></label>' .
         '<div class="actions">' .
         action_submit('compose-up', 'Up') .
         action_submit('compose-down', 'Down') .
@@ -3289,19 +3305,17 @@ function parse_scoped_container_table(array $lines): array
 
 function run_form(array $images): string
 {
-    $options = '';
+    $datalist = '<datalist id="image-options">';
     foreach ($images as $image) {
         $tag = $image['TAG'] ?? '';
         if ($tag !== '') {
-            $options .= '<option value="' . e($tag) . '">' . e($tag) . '</option>';
+            $datalist .= '<option value="' . e($tag) . '">';
         }
     }
-    if ($options === '') {
-        $options = '<option value="">No local image</option>';
-    }
+    $datalist .= '</datalist>';
     $basic = '<div class="run-basic">' .
         '<label>Name<input name="name" placeholder="myapp" required></label>' .
-        '<label>Image<select name="image" required>' . $options . '</select></label>' .
+        '<label>Image<input name="image" list="image-options" placeholder="alpine:latest or select" required>' . $datalist . '</label>' .
         '<label>Ports<input name="ports" placeholder="8080:8080"></label>' .
         '<button>Create</button>' .
         '</div>';

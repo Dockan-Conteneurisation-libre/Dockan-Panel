@@ -1,3 +1,7 @@
+{
+	admin off
+}
+
 :{$PORT:9090} {
 	bind {$BIND:0.0.0.0}
 	root * .
