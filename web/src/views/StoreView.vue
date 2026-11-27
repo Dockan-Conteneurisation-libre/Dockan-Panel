@@ -34,12 +34,16 @@ const counts = computed(() => {
 })
 
 const hues = [158, 172, 140, 190, 120, 205]
+const brokenIcons = ref<Record<string, boolean>>({})
 function badge(a: StoreApp): { text: string; bg: string } {
   let h = 0
   for (const ch of a.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0
   const words = a.name.split(/[\s-]+/).filter(Boolean)
   const text = (words.length > 1 ? (words[0]?.[0] ?? '') + (words[1]?.[0] ?? '') : a.name.slice(0, 2)).toUpperCase()
   return { text, bg: `hsl(${hues[h % hues.length]} 45% 32%)` }
+}
+function onIconError(id: string): void {
+  brokenIcons.value = { ...brokenIcons.value, [id]: true }
 }
 
 function open(a: StoreApp): void {
@@ -121,7 +125,10 @@ async function upload(): Promise<void> {
   <Empty v-if="data && !apps.length" icon="store" :text="t('store.empty')" />
   <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
     <button v-for="a in apps" :key="a.id" class="card app" @click="open(a)">
-      <span class="logo" :style="{ background: badge(a).bg }">{{ badge(a).text }}</span>
+      <span class="logo" :style="{ background: badge(a).bg }">
+        <img v-if="!brokenIcons[a.id]" :src="`/store-icons/${a.id}.svg`" :alt="a.name" class="logo-img" @error="onIconError(a.id)" />
+        <template v-else>{{ badge(a).text }}</template>
+      </span>
       <span class="min-w-0 flex-1 text-left">
         <span class="flex items-center gap-2"><strong class="truncate">{{ a.name }}</strong></span>
         <span class="mt-0.5 block text-[0.74rem] tracking-wide text-muted uppercase">{{ a.category }}</span>
@@ -203,6 +210,7 @@ async function upload(): Promise<void> {
 .app { display: flex; gap: 0.9rem; padding: 1rem; cursor: pointer; color: inherit; font: inherit; text-align: left; transition: border-color .12s, transform .12s; }
 .app:hover { border-color: var(--color-teal); transform: translateY(-1px); }
 .logo { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border-radius: 10px; color: #fff; font-weight: 700; font-size: 0.95rem; letter-spacing: 0.02em; }
+.logo-img { width: 24px; height: 24px; display: block; object-fit: contain; }
 .pill.on { color: var(--color-leaf); border-color: color-mix(in srgb, var(--color-leaf) 35%, transparent); }
 .pill.warn { color: var(--color-signal); border-color: color-mix(in srgb, var(--color-signal) 40%, transparent); }
 .seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--color-surface); border: 1px solid var(--color-line); }
