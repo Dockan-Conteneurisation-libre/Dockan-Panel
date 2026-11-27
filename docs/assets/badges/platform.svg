@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="20" role="img" aria-label="Linux: amd64 | arm64">
+  <rect width="47" height="20" rx="3" fill="#0e2a1e"/>
+  <rect x="47" width="103" height="20" rx="3" fill="#1a5e3a"/>
+  <rect x="47" width="4" height="20" fill="#1a5e3a"/>
+  <g fill="#ffffff" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11" text-anchor="middle">
+    <text x="23.5" y="14">Linux</text>
+    <text x="98.5" y="14">amd64 | arm64</text>
+  </g>
+</svg>

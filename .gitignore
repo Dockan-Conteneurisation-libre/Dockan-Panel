@@ -1,3 +1,13 @@
 storage/*
 !storage/.gitignore
 storage.backup-*
+
+# Local tool settings
+.claude/
+
+# Build output
+/dockan-panel
+/dist/
+web/node_modules/
+internal/webui/ui/*
+!internal/webui/ui/.gitkeep

@@ -12,7 +12,7 @@ services:
       - PANEL_UPDATE_DIR=/srv/dockan-panel
     volumes:
       - dockan-panel-data:/app/storage
-    command: frankenphp run --config Caddyfile
+    command: ./dockan-panel
     isolation: none
     restart: always
-    healthcheck: CMD-SHELL curl -fsS http://127.0.0.1:9090/ >/dev/null
+    healthcheck: CMD-SHELL curl -fsS http://127.0.0.1:9090/api/session >/dev/null

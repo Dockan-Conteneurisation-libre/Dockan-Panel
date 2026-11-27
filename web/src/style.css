@@ -1,0 +1,138 @@
+@import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
+
+/* Same palette as the Dockan site: pine greens from the official logo. */
+@theme {
+  --color-pine: #0e2a1e;
+  --color-pine-2: #15392a;
+  --color-pine-3: #1c4634;
+  --color-pine-line: #24503c;
+  --color-leaf: #1a5e3a;
+  --color-teal: #2b8c7e;
+  --color-teal-2: #33a091;
+  --color-mint: #9fd8c6;
+  --color-signal: #d99a2b;
+  --color-danger: #c2412d;
+  --color-paper: #f4f6f2;
+  --color-surface: #ffffff;
+  --color-surface-2: #f8faf7;
+  --color-ink: #14201a;
+  --color-muted: #4d5c54;
+  --color-line: #d5ddd6;
+  --color-code: #eaf0eb;
+  --font-sans: system-ui, -apple-system, "Segoe UI", "Noto Sans", Ubuntu, Cantarell, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", "Liberation Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-paper: #0f1713;
+    --color-surface: #15201a;
+    --color-surface-2: #182520;
+    --color-ink: #e2ebe5;
+    --color-muted: #a6b6ad;
+    --color-line: #2a3a31;
+    --color-code: #1b2a22;
+    --color-leaf: #4fb07c;
+    --color-teal: #5cc2b0;
+    --color-teal-2: #6fd0be;
+    --color-danger: #e0715f;
+  }
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+}
+/* 16 px fields on phones: iOS does not zoom on focus. */
+@media (max-width: 640px) {
+  .input, select, textarea { font-size: 16px !important; }
+}
+:focus-visible { outline: 2px solid var(--color-teal); outline-offset: 2px; border-radius: 4px; }
+
+@layer components {
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 10px;
+  }
+  .card-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: 0.9rem 1.1rem; border-bottom: 1px solid var(--color-line);
+  }
+  .card-head h2 { margin: 0; font-size: 0.98rem; font-weight: 650; }
+  .card-body { padding: 1.1rem; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+    min-height: 36px; padding: 0 0.85rem; border-radius: 7px;
+    border: 1px solid var(--color-line); background: var(--color-surface); color: var(--color-ink);
+    font: 600 0.86rem/1 var(--font-sans); cursor: pointer; white-space: nowrap;
+    transition: background-color .12s, border-color .12s;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--color-teal); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn svg { width: 16px; height: 16px; flex: none; }
+  .btn-primary { background: var(--color-teal); border-color: var(--color-teal); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: var(--color-teal-2); border-color: var(--color-teal-2); }
+  .btn-danger { color: var(--color-danger); }
+  .btn-danger:hover:not(:disabled) { border-color: var(--color-danger); }
+  .btn-solid-danger { background: var(--color-danger); border-color: var(--color-danger); color: #fff; }
+  .btn-solid-danger:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--color-danger); }
+  .btn-ghost { border-color: transparent; background: transparent; }
+  .btn-ghost:hover:not(:disabled) { background: var(--color-surface-2); border-color: var(--color-line); }
+  .btn-sm { min-height: 30px; padding: 0 0.6rem; font-size: 0.8rem; }
+  .btn-icon { width: 34px; padding: 0; }
+
+  .field { display: grid; gap: 0.35rem; font-size: 0.85rem; font-weight: 600; }
+  .field .hint { font-weight: 400; color: var(--color-muted); font-size: 0.8rem; }
+  .input {
+    width: 100%; min-height: 38px; padding: 0.45rem 0.7rem; border-radius: 7px;
+    border: 1px solid var(--color-line); background: var(--color-surface-2); color: var(--color-ink);
+    font: 400 0.9rem/1.4 var(--font-sans);
+  }
+  .input:focus { outline: none; border-color: var(--color-teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-teal) 22%, transparent); }
+  textarea.input { font-family: var(--font-mono); font-size: 0.84rem; line-height: 1.55; resize: vertical; }
+  .code-input { min-height: 320px; tab-size: 2; }
+
+  .table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .table th {
+    text-align: left; font-weight: 600; color: var(--color-muted); font-size: 0.78rem;
+    padding: 0.6rem 1.1rem; border-bottom: 1px solid var(--color-line); white-space: nowrap;
+  }
+  .table td { padding: 0.65rem 1.1rem; border-top: 1px solid var(--color-line); vertical-align: middle; }
+  .table tbody tr:first-child td { border-top: 0; }
+  .table tbody tr:hover td { background: var(--color-surface-2); }
+  .mono { font-family: var(--font-mono); font-size: 0.82rem; }
+  .path { font-family: var(--font-mono); font-size: 0.8rem; color: var(--color-muted); word-break: break-all; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.1rem 0.55rem; border-radius: 999px;
+    font-size: 0.76rem; font-weight: 600; border: 1px solid var(--color-line); color: var(--color-muted); white-space: nowrap;
+  }
+  .link { color: var(--color-teal); font-weight: 600; text-decoration: none; }
+  .link:hover { text-decoration: underline; }
+  .error-box {
+    margin: 0 0 1rem; padding: 0.7rem 0.9rem; border-radius: 8px; font-size: 0.86rem; white-space: pre-wrap;
+    border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent);
+    background: color-mix(in srgb, var(--color-danger) 9%, transparent); color: var(--color-danger);
+  }
+  .form-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .check { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.88rem; cursor: pointer; }
+  .check input { width: 16px; height: 16px; accent-color: var(--color-teal); }
+  .tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--color-line); margin-bottom: 1rem; overflow-x: auto; }
+  .tabs button {
+    display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.6rem 0.85rem; border: 0; background: none;
+    color: var(--color-muted); font: 600 0.88rem/1 var(--font-sans); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap;
+  }
+  .tabs button.on { color: var(--color-ink); border-bottom-color: var(--color-teal); }
+  .pre {
+    margin: 0; padding: 0.9rem 1rem; background: var(--color-code); border-radius: 8px;
+    font: 0.8rem/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto;
+  }
+}

@@ -1,428 +1,110 @@
-<p align="center">
-  <img src="./dockan-logo.svg" alt="Dockan Panel logo" width="96">
-</p>
+# Dockan Panel
 
-<h1 align="center">Dockan Panel</h1>
+<p align="center"><img src="docs/assets/dockan-logo.svg" alt="Dockan Panel" width="96"></p>
 
-<p align="center">
-  A small standalone PHP web interface for Dockan.
-</p>
+Retpanelo por [Dockan](https://github.com/Dockan-Conteneurisation-libre/Dockan): ujoj, bildoj, volumoj, stakoj kaj vendejo de memgastigataj aplikaĵoj.
+Unu statika Go-duumaĵo kun enkonstruita Vue-interfaco, sen PHP, sen demono, sen CDN.
 
-<p align="center">
-  <img alt="PHP 8.3+" src="https://img.shields.io/badge/PHP-8.3%2B-777BB4?logo=php&logoColor=white">
-  <img alt="Dockan app" src="https://img.shields.io/badge/runs%20with-Dockan-176b48">
-  <img alt="PWA ready" src="https://img.shields.io/badge/PWA-ready-0e4932">
-  <img alt="Local first" src="https://img.shields.io/badge/local--first-admin%20panel-17201b">
-</p>
+![stato](docs/assets/badges/status.svg) ![versio](docs/assets/badges/version.svg) ![Dockan](docs/assets/badges/dockan.svg) ![Linux](docs/assets/badges/platform.svg)
 
-This project is separate from the Dockan CLI repository. It is meant to live in
-its own repository and call the local `dockan` command installed on the machine.
+**Esperanto** · [Français](docs/i18n/README.fr.md) · [English](docs/i18n/README.en.md) · [Español](docs/i18n/README.es.md)
 
-Current panel version: `v0.2.0`.
+Nuna versio: `v0.2.1`.
 
-## Interface
-
-![Dockan Panel interface](./DockanPanel.png)
-
-It can:
-
-- list containers, images, volumes, and networks
-- pull OCI images directly from Docker Hub, GitHub Container Registry (GHCR), Quay, or custom registries
-- show Dockan CLI `ps --scope all` results when available, so user and system stores appear in the same Containers view
-- show logs
-- run healthchecks
-- stop and remove containers
-- remove images
-- create volumes
-- back up volumes to local `storage/backups`
-- restore backups into a new empty volume
-- create containers from local images or pull directly on-the-fly (with autocomplete) with ports, volumes, environment variables, network, aliases, restart policy, healthcheck, CPU/RAM limits, GUI sockets, entrypoint, and command
-- run `dockan compose up`, `down`, `redeploy`, and `health` for `dockan.yml`, `compose.yaml`, or `docker-compose.yml`
-- manage Portainer-style stacks from the UI by saving compose files, then deploying, stopping, redeploying, and checking health
-- import required stack images from a local Dockan registry folder before deployment
-- install and update Dockan Store from the panel, then install 31 Store apps with one click
-- inspect Dockan, PHP, FrankenPHP, and Dockan Panel versions, preview dependency installs, install host packages/runtimes, run Dockan updates, and update the panel from GitHub
-- open a container detail page with actions, inspect output, logs, a live PTY terminal, and a one-shot exec fallback
-- manage admin users with password login, optional authenticator-app 2FA, and passkeys
-- install in the browser as a local PWA, with the Dockan logo and standalone window mode
-
-## Start
-
-### With Dockan
-
-The panel can run as a Dockan app. Install the `frankenphp` binary on the host
-first; the Dockan image is intentionally `scratch` and calls that local runtime.
+## Rapida starto
 
 ```bash
-cd /path/to/Dockan-Panel
-dockan compose up
+curl -fsSLO https://github.com/Dockan-Conteneurisation-libre/Dockan-Panel/releases/latest/download/dockan-panel-linux-amd64.tar.gz && tar -xzf dockan-panel-linux-amd64.tar.gz && ./dockan-panel/dockan-panel
 ```
 
-Open:
+Malfermu `http://127.0.0.1:9090`. Por la unua konto, la panelo petas **instalan kodon**: ĝi aperas en la protokolo de la panelo kaj en la dosiero `storage/setup-token`. Tiel neniu alia en la reto povas krei la administran konton antaŭ vi.
+
+## Ekrankopioj
+
+| Ensaluto | Ujo | Vendejo |
+| --- | --- | --- |
+| ![Ensaluto](docs/assets/screenshots/login.jpg) | ![Ujo](docs/assets/screenshots/container.jpg) | ![Vendejo](docs/assets/screenshots/store.jpg) |
+
+## Funkcioj
+
+| Parto | Kion ĝi faras |
+| --- | --- |
+| Superrigardo | Funkciantaj ujoj, bildoj, volumoj, retoj, stakoj, eligo de `dockan doctor` |
+| Ujoj | Ĉiuj deponejoj (`--scope all`), lanĉo (`run -d`) kun pordoj, medio, volumoj, izolado, limoj |
+| Ujo | Informoj, interaga terminalo (xterm.js), protokoloj, inspekto, unuopa komando |
+| Bildoj | Elŝuto (ankaŭ `nomo@sha256:…`, privataj registrejoj), forigo |
+| Volumoj | Kreo, forigo, savkopio kaj restarigo |
+| Stakoj | Redaktilo de `dockan.yml`, starto, halto, redeplojo, sano, importo de bildoj; plenumo de ekzistanta compose-dosiero |
+| Vendejo | Katalogo de la Dockan-vendejo, instalo, starto je praŝargo, ĝisdatigo de bildoj, agordo, alŝuto de statika retejo |
+| Sistemo | Versioj, dependaĵoj, ĝisdatigo de Dockan kaj de la panelo (kontrolita per SHA256) |
+| Sekureco | Kontoj, dufaktora aŭtentigo (TOTP), aliroŝlosiloj (WebAuthn) |
+
+La interfaco ekzistas en esperanto, franca, angla kaj hispana, en hela kaj malhela reĝimoj, por komputilo kaj poŝtelefono.
+
+## Kongrueco
+
+| Elemento | Subtenata |
+| --- | --- |
+| Dockan | v0.2.5 kaj pli novaj |
+| Sistemo | Linukso amd64 kaj arm64 (statika duumaĵo, sen dependaĵo) |
+| Retumilo | Lastaj versioj de Firefox, Chromium, Safari; aliroŝlosiloj bezonas HTTPS aŭ `localhost` |
+| Datumoj de la PHP-panelo | `auth-users.json` (bcrypt `$2y$`, TOTP, aliroŝlosiloj), stakoj, savkopioj kaj vendejo estas reuzataj senŝanĝe |
+
+## Agordo
+
+| Variablo | Defaŭlto | Rolo |
+| --- | --- | --- |
+| `BIND` | `0.0.0.0` | Aŭskulta adreso (`127.0.0.1` por nur loka aliro) |
+| `PORT` | `9090` | Aŭskulta pordo |
+| `DOCKAN_BIN` | `dockan` | Vojo al la `dockan`-duumaĵo |
+| `PANEL_STORAGE` | `<dosierujo de la duumaĵo>/storage` | Kontoj, stakoj, savkopioj, vendejo |
+| `PANEL_UPDATE_DIR` | dosierujo de la duumaĵo | Kien la panela ĝisdatigo instalas la novan version |
+
+Seancoj restas en memoro: restarto de la panelo elsalutas ĉiujn.
+
+## Kiel Dockan-servo
+
+La eldona arĥivo enhavas `Dockanfile` kaj `dockan.yml`. En la servilo:
+
+```bash
+sudo mkdir -p /srv/dockan-panel && sudo tar -xzf dockan-panel-linux-amd64.tar.gz -C /srv --no-same-owner
+sudo dockan compose autostart -f /srv/dockan-panel/dockan.yml --name dockan-panel
+```
+
+Por eksponi ĝin en interreto, metu ĝin malantaŭ HTTPS-inversan prokurilon kaj limigu la aliron. La panelo povas plenumi komandojn kiel root: neniam eksponu ĝin sen HTTPS.
+
+## Migrado de la PHP-panelo (v0.2.0)
+
+Vidu [docs/MIGRATION.md](docs/MIGRATION.md). La datumoj (`dockan-panel-data`) restas netuŝitaj.
+
+## Arĥitekturo
 
 ```text
-http://127.0.0.1:9090
+cmd/dockan-panel/     enirpunkto (HTTP-servilo, ĉesigo)
+internal/api/         JSON-API, seancoj, CSRF, sekurecaj kapoj
+internal/auth/        kontoj, bcrypt, TOTP, WebAuthn, limigo de provoj
+internal/dockan/      legado de la eligoj de dockan
+internal/runner/      plenumo de komandoj (sen ŝelo, aŭ citita skripto)
+internal/stacks/      stakoj sub storage/stacks
+internal/store/       vendejo kaj alŝuto de retejo (limigita per os.Root)
+internal/system/      versioj, dependaĵoj, ĝisdatigoj
+internal/terminal/    pseŭdoterminaloj por la interaga ŝelo
+internal/webui/       la konstruita Vue-interfaco, enkonstruita per go:embed
+web/                  Vue 3 + TypeScript + Tailwind (Vite)
+deploy/               Dockanfile kaj dockan.yml
+scripts/              versio kaj restarigo de datumoj
 ```
 
-For production, install the same Dockan app as a system service with Dockan:
+## Konstrui
 
 ```bash
-sudo dockan compose autostart -f /path/to/Dockan-Panel/dockan.yml --name dockan-panel
+make build    # npm ci, Vite, poste go build: ./dockan-panel
+make test     # go vet, go test, vue-tsc, paritato de la tradukoj
+make dist     # dist/dockan-panel-linux-{amd64,arm64}.tar.gz kaj SHA256SUMS
 ```
 
-This keeps Dockan Panel managed by Dockan while starting it as a root/system
-service. In that mode the `Packages` page can run host package installs and
-runtime updates directly.
+Necesas Go 1.26 kaj Node.js 22.
 
-On a server, the default image runs FrankenPHP/Caddy and listens on all
-interfaces:
+## Kontribui
 
-```yaml
-command: frankenphp run --config Caddyfile
-```
-
-That means the panel can also be reached from the private network with:
-
-```text
-http://SERVER_PRIVATE_IP:9090
-```
-
-For a local-only panel, override the bind address:
-
-```yaml
-env:
-  - DOCKAN_BIN=dockan
-  - PORT=9090
-  - BIND=127.0.0.1
-```
-
-On first launch, create the first admin account in the setup page. There is no
-default password and no default token.
-
-The panel is also installable as a PWA from browsers that support it. Open the
-browser menu and choose the install/app shortcut option. PWA install works on
-`localhost`, `127.0.0.1`, or HTTPS. The service worker is network-first and does
-not cache authenticated admin pages, so container management still needs access
-to the running local panel.
-
-After login, open `Security` to add other admins, change passwords, enable 2FA,
-or register passkeys. Passkeys require `localhost`, `127.0.0.1`, or HTTPS.
-
-Open `Packages` to check the current Dockan version, preview dependency
-profiles, install host dependencies, prepare runtimes such as FrankenPHP or
-Node, run Dockan release updates, and update Dockan Panel itself from GitHub.
-For one-click system installs and panel updates, run the panel as a root/system
-service or grant passwordless permission for Dockan package and update actions.
-When the panel is launched as a normal user, the `Packages` page marks system
-automation as disabled and keeps `Preview`/`Show Command` available.
-
-Open `Store` to install or update Dockan Store from its latest GitHub release.
-The panel keeps the Store under `storage/store/Dockan-Store`, then app cards can
-install only the images and template needed by the selected app. In production,
-the default target is `/srv/dockan-apps/APP_ID`; non-root panels default to
-`$HOME/dockan-apps/APP_ID`. `Install + Launch` runs the app with
-`dockan compose up` after the template is installed. Existing Store apps show
-`Update Images` and `Update Images + Redeploy` actions to force-refresh the
-bundled images from the latest Store release while keeping the installed
-`dockan.yml` and volumes. Redeploy uses the Store's `update` command when
-available. After the Store itself is updated, installed app cards compare the
-latest Store image checksums with the image state last applied by the panel and
-show `update available`, `images current`, or `update status unknown`. Apps
-installed before this tracking was introduced show unknown until their next
-panel-driven install or image update.
-
-This compose file uses `isolation: none` because the panel is an admin UI: it
-must call the host `dockan` CLI and manage the host Dockan containers.
-Dockan CLI `v0.1.14` or newer is recommended so the panel can distinguish
-`current`, `system`, and `user` container stores.
-
-Users, passkeys, stacks, and backups are stored in the persistent
-`dockan-panel-data` volume.
-
-The important files inside the panel are:
-
-```text
-/app/storage/auth-users.json
-/app/storage/stacks/
-/app/storage/backups/
-```
-
-On a normal user install, Dockan keeps the persistent volume on the host under:
-
-```text
-~/.local/share/dockan/volumes/dockan-panel-data
-```
-
-Do not remove this volume unless you want to reset the panel. Removing it
-removes admin users, password hashes, 2FA secrets, passkeys, stacks, and panel
-backups.
-
-On the Stacks page, fill `Required images` and `Registry folder`, then click
-`Import Required Images`. This runs `dockan pull <image> <registry-folder>` for
-each image. If the registry folder is empty, Dockan uses its default local
-registry.
-
-## Production Exposure
-
-Dockan Panel is an admin UI. Do not expose it directly to the Internet over
-plain HTTP.
-
-The recommended production shape is:
-
-```text
-Internet -> HTTPS reverse proxy -> Dockan Panel
-```
-
-Pangolin, Caddy, Nginx, Traefik, or Cloudflare Tunnel can be used as the HTTPS
-reverse proxy.
-
-### Default Server Mode
-
-By default, Dockan Panel uses the host `frankenphp` binary and listens on all
-interfaces:
-
-```yaml
-command: frankenphp run --config Caddyfile
-```
-
-This makes it usable from another machine on the private network:
-
-```text
-http://192.168.x.x:9090
-```
-
-Use this when Pangolin or another reverse proxy is not installed on the same
-machine as Dockan Panel.
-
-### Pangolin On Another Machine
-
-If Pangolin runs on another server, keep the default `BIND=0.0.0.0` setting and
-redeploy:
-
-```bash
-dockan compose redeploy
-```
-
-From the Dockan server, verify both addresses:
-
-```bash
-curl http://127.0.0.1:9090
-curl http://192.168.x.x:9090
-```
-
-In Pangolin, set the internal/backend URL to the Dockan server IP:
-
-```text
-http://192.168.x.x:9090
-```
-
-Replace `192.168.x.x` with the real private IP of the Dockan Panel server.
-
-Protect port `9090` with a firewall so only the Pangolin server can reach it.
-
-With `ufw`:
-
-```bash
-sudo ufw allow from PANGOLIN_IP to any port 9090 proto tcp
-sudo ufw deny 9090/tcp
-```
-
-With `firewalld`:
-
-```bash
-sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="PANGOLIN_IP" port port="9090" protocol="tcp" accept'
-sudo firewall-cmd --reload
-```
-
-Replace `PANGOLIN_IP` with the private IP of the Pangolin server.
-
-### Pangolin On The Same Machine
-
-If Pangolin runs on the same server as Dockan Panel, you can make the panel
-local-only:
-
-```yaml
-env:
-  - DOCKAN_BIN=dockan
-  - PORT=9090
-  - BIND=127.0.0.1
-```
-
-Then redeploy:
-
-```bash
-dockan compose redeploy
-```
-
-In Pangolin, set the internal/backend URL to:
-
-```text
-http://127.0.0.1:9090
-```
-
-Your public URL can then be something like:
-
-```text
-https://dockan.example.com
-```
-
-This is the safest setup when Pangolin and Dockan Panel are on the same
-machine, because port `9090` is reachable only locally.
-
-### Public HTTPS Notes
-
-Use HTTPS for the public URL. Passkeys work on `localhost`, `127.0.0.1`, or
-HTTPS. Browsers usually block passkeys on plain HTTP LAN addresses such as
-`http://192.168.x.x:9090`.
-
-Keep strong admin passwords, enable 2FA or passkeys, and restrict access with a
-VPN, allowlist, or Pangolin access policy when possible.
-
-### Direct PHP For Development
-
-You can also run it directly with PHP during local development:
-
-```bash
-cd /path/to/Dockan-Panel
-php -S 127.0.0.1:9090 index.php
-```
-
-Open:
-
-```text
-http://127.0.0.1:9090
-```
-
-Create the first admin account on the setup page.
-
-If `dockan` is installed in `~/.local/bin`, the panel adds that directory to
-`PATH` automatically.
-
-## Persistent Storage
-
-Dockan Panel keeps its data in `storage/` when it runs directly with PHP.
-
-When it runs as a Dockan app, `storage/` is mounted from the
-`dockan-panel-data` volume:
-
-```yaml
-volumes:
-  - dockan-panel-data:/app/storage
-```
-
-The auth database is a local JSON file:
-
-```text
-storage/auth-users.json
-```
-
-It stores password hashes, not plain passwords. It also stores TOTP secrets and
-passkey public keys. Treat this file like a secret and back it up safely.
-
-## Backup And Restore
-
-Backup the whole panel state:
-
-```bash
-dockan volume backup dockan-panel-data dockan-panel-backup.tar.gz
-```
-
-Restore it into a fresh volume:
-
-```bash
-dockan volume restore dockan-panel-data dockan-panel-backup.tar.gz
-```
-
-After restoring, redeploy the panel:
-
-```bash
-dockan compose redeploy
-```
-
-### Local Storage To Production Service
-
-If the panel was first launched directly from the repository and later moved to
-the production system service, the local `storage/` directory can be copied into
-the production Dockan volume with:
-
-```bash
-cd /path/to/Dockan-Panel
-sudo ./restore-prod-storage.sh
-```
-
-The script stops `dockan-dockan-panel.service`, unmounts any stale
-`/app/storage` bind mount, backs up the existing production volume as
-`/var/lib/dockan/volumes/dockan-panel-data.backup-YYYYMMDD-HHMMSS`, copies the
-local `storage/` data into `/var/lib/dockan/volumes/dockan-panel-data`, restores
-SELinux labels when `restorecon` is available, and starts the service again.
-
-Use this only for repair or migration. A normal production install should keep
-all panel data in `dockan-panel-data` from the beginning.
-
-## Panel Updates
-
-The `Packages` page includes a `Panel GitHub Update` form. It downloads the
-selected GitHub ref from `Dockan-Conteneurisation-libre/Dockan-Panel`, updates
-the application files in the current panel directory, leaves `storage/`
-untouched, restores SELinux labels when available, and asks systemd to restart
-`dockan-dockan-panel.service`.
-
-For a production service running from `/srv/dockan-panel`, keep this environment
-variable in `dockan.yml`:
-
-```yaml
-env:
-  - PANEL_UPDATE_DIR=/srv/dockan-panel
-```
-
-Then open `Packages`, set `GitHub ref` to `main` or a release tag such as
-`v0.1.0`, then click `Run Panel Update`.
-
-The same command can be previewed from the panel with `Show Command`. One-click
-updates require the panel to run as the root/system service; otherwise run the
-shown command manually with `sudo`.
-
-## Release Workflow
-
-Dockan Panel publishes GitHub releases automatically when a version tag is
-pushed. The release contains a `dockan-panel-VERSION.tar.gz` archive, a
-`SHA256SUMS` file, and generated notes listing the commits since the previous
-tag.
-
-Before tagging a new release, bump the version displayed by the panel:
-
-```bash
-./scripts/bump-version.sh v0.1.6
-git add index.php README.md
-git commit -m "Release Dockan Panel v0.1.6"
-git tag -a v0.1.6 -m "Dockan Panel v0.1.6"
-git push
-git push origin v0.1.6
-```
-
-The pushed tag triggers `.github/workflows/release.yml`. The workflow verifies
-that `APP_VERSION` and this README match the tag before it creates the GitHub
-release. Production panels can then update from `Packages` by using the same
-tag in `Panel GitHub Update`.
-
-## Notes
-
-This UI executes the local `dockan` CLI as the current Linux user.
-
-The live terminal keeps a shell open through `dockan exec <container> sh -li`
-and a local PTY helper. It uses `socat` when available, otherwise the
-util-linux `script` command. The one-shot Quick Exec form is still available
-for simple commands.
-
-In the Containers page, click a container name to open its detail page. From
-there you can run commands inside it, read logs, inspect metadata, stop it,
-remove it, or run its healthcheck.
-
-If it listens on `BIND=0.0.0.0`, protect port `9090` with a firewall and expose the
-public access through HTTPS. If the reverse proxy runs on the same machine, set
-`BIND=127.0.0.1` for the panel service.
-
-Passkeys are verified server-side with the browser challenge and signature. They
-are still browser-dependent: if your browser cannot expose the WebAuthn public
-key during registration, use password plus 2FA instead.
-# Dockan-Panel
+Malfermu temon aŭ tirpeton. Ĉiu ŝanĝo devas pasi `make test`; ĉiu nova teksto de la interfaco aperas en la kvar lingvoj (`web/src/i18n/`).

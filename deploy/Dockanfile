@@ -1,0 +1,6 @@
+FROM scratch
+WORKDIR /app
+COPY dockan-panel /app/dockan-panel
+COPY README.md /app/README.md
+EXPOSE 9090
+CMD exec ./dockan-panel

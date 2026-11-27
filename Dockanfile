@@ -1,8 +1,0 @@
-FROM scratch
-WORKDIR /app
-COPY index.php /app/index.php
-COPY README.md /app/README.md
-COPY dockan-logo.svg /app/dockan-logo.svg
-COPY Caddyfile /app/Caddyfile
-EXPOSE 9090
-CMD exec frankenphp run --config Caddyfile
