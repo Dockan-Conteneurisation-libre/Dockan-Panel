@@ -9,7 +9,7 @@ Un solo binario Go estático con la interfaz Vue integrada: sin PHP, sin demonio
 
 [Esperanto](../../README.md) · [Français](README.fr.md) · [English](README.en.md) · **Español**
 
-Versión actual: `v0.2.1`.
+Versión actual: `v0.2.2`.
 
 ## Inicio rápido
 

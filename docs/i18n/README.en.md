@@ -9,7 +9,7 @@ One static Go binary with the Vue interface built in: no PHP, no daemon, no CDN.
 
 [Esperanto](../../README.md) · [Français](README.fr.md) · **English** · [Español](README.es.md)
 
-Current version: `v0.2.1`.
+Current version: `v0.2.2`.
 
 ## Quickstart
 

@@ -9,7 +9,7 @@ Unu statika Go-duumaĵo kun enkonstruita Vue-interfaco, sen PHP, sen demono, sen
 
 **Esperanto** · [Français](docs/i18n/README.fr.md) · [English](docs/i18n/README.en.md) · [Español](docs/i18n/README.es.md)
 
-Nuna versio: `v0.2.1`.
+Nuna versio: `v0.2.2`.
 
 ## Rapida starto
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.2
+
+### Esperanto
+- 31 oficialaj SVG-emblemoj de la Dockan-vendejo enkonstruitaj loke sen ia ajn ekstera CDN.
+
+### Français
+- 31 logos SVG officiels du Dockan Store embarqués en local sans aucun CDN externe.
+
+### English
+- 31 official Dockan Store SVG logos embedded locally with zero external CDN.
+
+### Español
+- 31 logotipos SVG oficiales de Dockan Store integrados localmente sin CDN externo.
+
 ## v0.2.1
 
 ### Esperanto

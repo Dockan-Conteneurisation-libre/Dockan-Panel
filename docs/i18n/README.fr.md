@@ -9,7 +9,7 @@ Un seul binaire Go statique avec l'interface Vue intégrée, sans PHP, sans dém
 
 [Esperanto](../../README.md) · **Français** · [English](README.en.md) · [Español](README.es.md)
 
-Version actuelle : `v0.2.1`.
+Version actuelle : `v0.2.2`.
 
 ## Démarrage rapide
 
