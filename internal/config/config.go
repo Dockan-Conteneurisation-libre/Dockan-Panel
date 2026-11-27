@@ -11,7 +11,7 @@ import (
 
 // Version is the panel version, set at build time with
 // -ldflags "-X dockan-panel/internal/config.Version=vX.Y.Z".
-var Version = "v0.2.1"
+var Version = "v0.2.2"
 
 const (
 	AppName     = "Dockan Panel"
