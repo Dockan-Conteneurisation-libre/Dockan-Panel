@@ -30,7 +30,7 @@ dist: web
 	for arch in amd64 arm64; do \
 	  dir=$(DIST)/$$arch/dockan-panel; mkdir -p $$dir; \
 	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build $(GOFLAGS_BUILD) -o $$dir/dockan-panel ./cmd/dockan-panel; \
-	  cp README.md deploy/Dockanfile deploy/dockan.yml scripts/restore-prod-storage.sh $$dir/; \
+	  cp README.md LICENSE deploy/Dockanfile deploy/dockan.yml scripts/restore-prod-storage.sh $$dir/; \
 	  tar -C $(DIST)/$$arch --owner=0 --group=0 -czf $(DIST)/dockan-panel-linux-$$arch.tar.gz dockan-panel; \
 	done
 	cd $(DIST) && sha256sum dockan-panel-linux-*.tar.gz > SHA256SUMS

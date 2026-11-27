@@ -5,7 +5,7 @@
 Panneau web pour [Dockan](https://github.com/Dockan-Conteneurisation-libre/Dockan) : conteneurs, images, volumes, stacks et store d'applications auto-hébergées.
 Un seul binaire Go statique avec l'interface Vue intégrée, sans PHP, sans démon, sans CDN.
 
-![état](../assets/badges/status.svg) ![version](../assets/badges/version.svg) ![Dockan](../assets/badges/dockan.svg) ![Linux](../assets/badges/platform.svg)
+![état](../assets/badges/status.svg) ![version](../assets/badges/version.svg) ![Dockan](../assets/badges/dockan.svg) ![Linux](../assets/badges/platform.svg) ![licence](../assets/badges/license.svg)
 
 [Esperanto](../../README.md) · **Français** · [English](README.en.md) · [Español](README.es.md)
 
@@ -108,3 +108,7 @@ Il faut Go 1.26 et Node.js 22.
 ## Contribuer
 
 Ouvrez un ticket ou une demande de fusion. Chaque changement doit passer `make test` ; tout nouveau texte d'interface est ajouté dans les quatre langues (`web/src/i18n/`).
+
+## Licence
+
+[GNU AGPL-3.0](../../LICENSE). Si vous proposez une version modifiée du panneau sur un réseau, vous devez en fournir le code source à ses utilisatrices et utilisateurs.

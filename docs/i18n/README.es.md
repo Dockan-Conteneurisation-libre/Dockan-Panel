@@ -5,7 +5,7 @@
 Panel web para [Dockan](https://github.com/Dockan-Conteneurisation-libre/Dockan): contenedores, imágenes, volúmenes, stacks y una tienda de aplicaciones autoalojadas.
 Un solo binario Go estático con la interfaz Vue integrada: sin PHP, sin demonio, sin CDN.
 
-![estado](../assets/badges/status.svg) ![versión](../assets/badges/version.svg) ![Dockan](../assets/badges/dockan.svg) ![Linux](../assets/badges/platform.svg)
+![estado](../assets/badges/status.svg) ![versión](../assets/badges/version.svg) ![Dockan](../assets/badges/dockan.svg) ![Linux](../assets/badges/platform.svg) ![licencia](../assets/badges/license.svg)
 
 [Esperanto](../../README.md) · [Français](README.fr.md) · [English](README.en.md) · **Español**
 
@@ -108,3 +108,7 @@ Necesita Go 1.26 y Node.js 22.
 ## Contribuir
 
 Abre una incidencia o una solicitud de fusión. Cada cambio debe pasar `make test`; todo texto nuevo de la interfaz se añade en los cuatro idiomas (`web/src/i18n/`).
+
+## Licencia
+
+[GNU AGPL-3.0](../../LICENSE). Si ofreces una versión modificada del panel a través de una red, debes dar su código fuente a sus usuarias y usuarios.

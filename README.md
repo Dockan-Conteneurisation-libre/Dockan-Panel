@@ -5,7 +5,7 @@
 Retpanelo por [Dockan](https://github.com/Dockan-Conteneurisation-libre/Dockan): ujoj, bildoj, volumoj, stakoj kaj vendejo de memgastigataj aplikaĵoj.
 Unu statika Go-duumaĵo kun enkonstruita Vue-interfaco, sen PHP, sen demono, sen CDN.
 
-![stato](docs/assets/badges/status.svg) ![versio](docs/assets/badges/version.svg) ![Dockan](docs/assets/badges/dockan.svg) ![Linux](docs/assets/badges/platform.svg)
+![stato](docs/assets/badges/status.svg) ![versio](docs/assets/badges/version.svg) ![Dockan](docs/assets/badges/dockan.svg) ![Linux](docs/assets/badges/platform.svg) ![licenco](docs/assets/badges/license.svg)
 
 **Esperanto** · [Français](docs/i18n/README.fr.md) · [English](docs/i18n/README.en.md) · [Español](docs/i18n/README.es.md)
 
@@ -108,3 +108,7 @@ Necesas Go 1.26 kaj Node.js 22.
 ## Kontribui
 
 Malfermu temon aŭ tirpeton. Ĉiu ŝanĝo devas pasi `make test`; ĉiu nova teksto de la interfaco aperas en la kvar lingvoj (`web/src/i18n/`).
+
+## Permesilo
+
+[GNU AGPL-3.0](LICENSE). Se vi provizas modifitan version de la panelo per reto, vi devas doni ĝian fontkodon al ĝiaj uzantoj.
